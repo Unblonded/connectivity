@@ -400,6 +400,11 @@
 				DEVELOPMENT_TEAM = TSKCM953CN;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = Yes;
+				INFOPLIST_KEY_NSLocationAlwaysUsageDescription = Yes;
+				INFOPLIST_KEY_NSLocationTemporaryUsageDescriptionDictionary = Yes;
+				INFOPLIST_KEY_NSLocationUsageDescription = Yes;
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = Yes;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -432,6 +437,11 @@
 				DEVELOPMENT_TEAM = TSKCM953CN;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = Yes;
+				INFOPLIST_KEY_NSLocationAlwaysUsageDescription = Yes;
+				INFOPLIST_KEY_NSLocationTemporaryUsageDescriptionDictionary = Yes;
+				INFOPLIST_KEY_NSLocationUsageDescription = Yes;
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = Yes;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
