@@ -4,7 +4,6 @@
 //
 //  Created by Edmund Edjhuryan on 9/9/26.
 //
-
 import SwiftUI
 
 enum AppTheme {

@@ -7,11 +7,17 @@
 import SwiftUI
 import MapKit
 
+struct SignalCircle: Identifiable {
+    let id = UUID()
+    let coordinate: CLLocationCoordinate2D
+    let radius: CLLocationDistance
+    let tier: SignalTier
+}
+
 struct ConnectivityMapView: UIViewRepresentable {
-    @Binding var samples: [ConnectivitySample]
     @Binding var startPoint: CLLocationCoordinate2D?
     @Binding var endPoint: CLLocationCoordinate2D?
-    var showSamples: Bool
+    @Binding var circles: [SignalCircle]
     var routeCoordinates: [CLLocationCoordinate2D]
 
     func makeUIView(context: Context) -> MKMapView {
@@ -32,17 +38,8 @@ struct ConnectivityMapView: UIViewRepresentable {
         map.removeAnnotations(customAnnotations)
         map.removeOverlays(map.overlays)
 
-        // Render filled heat/signal circles for each connectivity sample
-        if showSamples {
-            for sample in samples {
-                // Add annotation marker
-                let ann = SampleAnnotation(sample: sample)
-                map.addAnnotation(ann)
-                
-                // Add filled radius circle around sample (e.g., 200 meter radius)
-                let circle = SignalHeatOverlay(center: sample.coordinate, radius: 200, tier: sample.signalTier)
-                map.addOverlay(circle)
-            }
+        for circle in circles {
+            ConnectivityMapView.drawSignalCircle(on: map, at: circle.coordinate, radius: circle.radius, tier: circle.tier)
         }
 
         if let start = startPoint {
@@ -67,7 +64,6 @@ struct ConnectivityMapView: UIViewRepresentable {
         Coordinator(self)
     }
 
-    // Custom MKCircle class to retain signal strength metadata
     final class SignalHeatOverlay: MKCircle {
         var tier: SignalTier = .good
         
@@ -77,31 +73,26 @@ struct ConnectivityMapView: UIViewRepresentable {
         }
     }
 
-    final class SampleAnnotation: NSObject, MKAnnotation {
-        let sample: ConnectivitySample
-        var coordinate: CLLocationCoordinate2D { sample.coordinate }
-        var title: String? { sample.name }
-        init(sample: ConnectivitySample) { self.sample = sample }
+    @discardableResult
+    static func drawSignalCircle(
+        on map: MKMapView,
+        at location: CLLocationCoordinate2D,
+        radius: CLLocationDistance,
+        tier: SignalTier) -> SignalHeatOverlay {
+        let circle = SignalHeatOverlay(center: location, radius: radius, tier: tier)
+        map.addOverlay(circle)
+        return circle
     }
 
     final class Coordinator: NSObject, MKMapViewDelegate {
         var parent: ConnectivityMapView
-        private var hasAddedNearbyHeatmap = false
+        private var hasCenteredOnce = false
 
         init(_ parent: ConnectivityMapView) { self.parent = parent }
 
         func mapView(_ mapView: MKMapView, didUpdate userLocation: MKUserLocation) {
-            guard !hasAddedNearbyHeatmap, let userCoord = userLocation.location?.coordinate else { return }
-            hasAddedNearbyHeatmap = true
-            
-            // Example: Add a radius circle directly around the user (e.g. 300 meters)
-            let userRadiusCircle = SignalHeatOverlay(
-                center: userCoord,
-                radius: 300,
-                tier: .good
-            )
-            mapView.addOverlay(userRadiusCircle)
-            
+            guard !hasCenteredOnce, let userCoord = userLocation.location?.coordinate else { return }
+            hasCenteredOnce = true
             let region = MKCoordinateRegion(
                 center: userCoord,
                 span: MKCoordinateSpan(latitudeDelta: 0.02, longitudeDelta: 0.02)
@@ -118,9 +109,6 @@ struct ConnectivityMapView: UIViewRepresentable {
                 parent.startPoint = coordinate
             } else if parent.endPoint == nil {
                 parent.endPoint = coordinate
-            } else {
-                parent.startPoint = coordinate
-                parent.endPoint = nil
             }
         }
 
@@ -128,30 +116,16 @@ struct ConnectivityMapView: UIViewRepresentable {
             if annotation is MKUserLocation {
                 return nil
             }
-
-            if let sampleAnn = annotation as? SampleAnnotation {
-                let view = MKMarkerAnnotationView(annotation: sampleAnn, reuseIdentifier: "sample")
-                switch sampleAnn.sample.signalTier {
-                case .good: view.markerTintColor = UIColor(red: 0.09, green: 0.78, blue: 0.48, alpha: 1)
-                case .poor: view.markerTintColor = UIColor(red: 1.00, green: 0.60, blue: 0.30, alpha: 1)
-                case .dead: view.markerTintColor = UIColor(red: 1.00, green: 0.42, blue: 0.42, alpha: 1)
-                }
-                view.canShowCallout = true
-                return view
-            }
-            
-            let pinView = MKMarkerAnnotationView(annotation: annotation, reuseIdentifier: "nearbyPin")
+            let pinView = MKMarkerAnnotationView(annotation: annotation, reuseIdentifier: "pin")
             pinView.markerTintColor = .systemRed
             pinView.canShowCallout = true
             return pinView
         }
 
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
-            // 1. Handle Radius Circles (Heatmap Overlays)
             if let circleOverlay = overlay as? SignalHeatOverlay {
                 let renderer = MKCircleRenderer(circle: circleOverlay)
                 
-                // Set fill and stroke colors based on signal tier with opacity
                 switch circleOverlay.tier {
                 case .good:
                     renderer.fillColor = UIColor(red: 0.09, green: 0.78, blue: 0.48, alpha: 0.25)
@@ -168,7 +142,6 @@ struct ConnectivityMapView: UIViewRepresentable {
                 return renderer
             }
             
-            // 2. Handle Route Lines
             if let polyline = overlay as? MKPolyline {
                 let renderer = MKPolylineRenderer(polyline: polyline)
                 renderer.strokeColor = UIColor(red: 0.49, green: 0.83, blue: 0.99, alpha: 0.9)

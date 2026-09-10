@@ -4,12 +4,13 @@
 //
 //  Created by Edmund Edjhuryan on 9/9/26.
 //
-
 import SwiftUI
 import SwiftData
 
 @main
 struct connectivityApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
         ])

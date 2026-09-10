@@ -29,9 +29,22 @@
 		62AA67ED3051E3770083B8C2 /* connectivityUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = connectivityUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		62AA6825305235DC0083B8C2 /* Exceptions for "connectivity" folder in "connectivity" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 62AA67D33051E3760083B8C2 /* connectivity */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		62AA67D63051E3760083B8C2 /* connectivity */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				62AA6825305235DC0083B8C2 /* Exceptions for "connectivity" folder in "connectivity" target */,
+			);
 			path = connectivity;
 			sourceTree = "<group>";
 		};
@@ -400,6 +413,7 @@
 				DEVELOPMENT_TEAM = TSKCM953CN;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = connectivity/Info.plist;
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = Yes;
 				INFOPLIST_KEY_NSLocationAlwaysUsageDescription = Yes;
 				INFOPLIST_KEY_NSLocationTemporaryUsageDescriptionDictionary = Yes;
@@ -437,6 +451,7 @@
 				DEVELOPMENT_TEAM = TSKCM953CN;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = connectivity/Info.plist;
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = Yes;
 				INFOPLIST_KEY_NSLocationAlwaysUsageDescription = Yes;
 				INFOPLIST_KEY_NSLocationTemporaryUsageDescriptionDictionary = Yes;
