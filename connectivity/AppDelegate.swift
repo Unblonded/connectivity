@@ -20,8 +20,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, CLLocationManagerDelegate {
         
         // Location setup
         locationManager.delegate = self
-        locationManager.desiredAccuracy = kCLLocationAccuracyHundredMeters
-        locationManager.allowsBackgroundLocationUpdates = true
+        locationManager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
         locationManager.pausesLocationUpdatesAutomatically = false
         locationManager.requestAlwaysAuthorization()
         locationManager.startUpdatingLocation()
@@ -29,15 +28,13 @@ class AppDelegate: NSObject, UIApplicationDelegate, CLLocationManagerDelegate {
         return true
     }
     
-    // MARK: - CLLocationManagerDelegate
-    
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         switch manager.authorizationStatus {
         case .authorizedAlways:
+            manager.allowsBackgroundLocationUpdates = true
             manager.startUpdatingLocation()
         case .authorizedWhenInUse:
-            // Not enough — background location won't work
-            print("Need 'Always' permission for background updates")
+            print("Need 'Always' permission")
         case .denied, .restricted:
             print("Location permission denied")
         default:
