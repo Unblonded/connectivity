@@ -129,7 +129,12 @@ struct ContentView: View {
             if let loc = lastLocation {
                 Text(String(
                     format: "Lat: %.4f, Lng: %.4f • Speed: %i µ",
-                    loc.coordinate.latitude, loc.coordinate.longitude, 0 // zero is place holder gotta calc that
+                    loc.coordinate.latitude,
+                    loc.coordinate.longitude,
+                    speedScore(
+                        d: UserStore.shared.downloadMbps ?? 0,
+                        u: UserStore.shared.uploadMbps ?? 0
+                    )
                 ))
             } else {
                 Text("Loading Stats...")
@@ -166,6 +171,21 @@ struct ContentView: View {
                 circles = fetched.map { $0.toSignalCircle() }
             }
         }
+    }
+    
+    func speedScore(d: Double, u: Double) -> Int {
+        //to be determined still
+        let downWeight = 0.7
+        let upWeight = 0.3
+
+        let maxDown = 100.0
+        let maxUp = 50.0
+
+        let downScore = log10(1 + min(d, maxDown)) / log10(1 + maxDown)
+        let upScore = log10(1 + min(u, maxUp)) / log10(1 + maxUp)
+
+        let combined = (downScore * downWeight) + (upScore * upWeight)
+        return Int((combined * 100).rounded())
     }
 }
 

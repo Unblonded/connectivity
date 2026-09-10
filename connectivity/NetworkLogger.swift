@@ -21,6 +21,9 @@ final class NetworkLogger {
     private let endpoint = URL(string: "https://api.kalculator.lol/samples")!
 
     func logResult(_ result: SpeedTestResult, completion: ((Error?) -> Void)? = nil) {
+        // Update UserStore with latest speeds before sending
+        UserStore.shared.updateSpeed(downloadMbps: result.downloadMbps, uploadMbps: result.uploadMbps)
+
         var dict = (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(result))) as? [String: Any] ?? [:]
         dict["token"] = "CONGRESSIONAL-APP-CHALLENGE-ANTI-SPAM"
 

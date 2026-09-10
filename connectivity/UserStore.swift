@@ -1,10 +1,3 @@
-//
-//  UserStore.swift
-//  connectivity
-//
-//  Created by Edmund Edjhuryan on 9/9/26.
-//
-
 import Foundation
 import CoreLocation
 
@@ -14,6 +7,8 @@ final class UserStore: NSObject, CLLocationManagerDelegate, @unchecked Sendable 
     private let manager = CLLocationManager()
     private let lock = NSLock()
     private var _coordinate: CLLocationCoordinate2D?
+    private var _downloadMbps: Double?
+    private var _uploadMbps: Double?
 
     var coordinate: CLLocationCoordinate2D {
         lock.lock(); defer { lock.unlock() }
@@ -23,6 +18,23 @@ final class UserStore: NSObject, CLLocationManagerDelegate, @unchecked Sendable 
     var hasFix: Bool {
         lock.lock(); defer { lock.unlock() }
         return _coordinate != nil
+    }
+
+    var downloadMbps: Double? {
+        lock.lock(); defer { lock.unlock() }
+        return _downloadMbps
+    }
+
+    var uploadMbps: Double? {
+        lock.lock(); defer { lock.unlock() }
+        return _uploadMbps
+    }
+
+    func updateSpeed(downloadMbps: Double?, uploadMbps: Double?) {
+        lock.lock()
+        _downloadMbps = downloadMbps
+        _uploadMbps = uploadMbps
+        lock.unlock()
     }
 
     private override init() {
