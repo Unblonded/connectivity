@@ -14,6 +14,40 @@ struct SignalCircle: Identifiable {
     let tier: SignalTier
 }
 
+struct SignalCircleJSON: Decodable {
+    let id: Int
+    let loc: Location
+    let radius: Double
+    let speed: Speed
+    let sampleCount: Int
+
+    struct Location: Decodable {
+        let lat: Double
+        let lon: Double
+    }
+
+    struct Speed: Decodable {
+        let uploadMbps: Double
+        let downloadMbps: Double
+    }
+
+    func toSignalCircle() -> SignalCircle {
+        SignalCircle(
+            coordinate: CLLocationCoordinate2D(latitude: loc.lat, longitude: loc.lon),
+            radius: radius,
+            tier: tierFromSpeed(speed.downloadMbps)
+        )
+    }
+
+    private func tierFromSpeed(_ downloadMbps: Double) -> SignalTier {
+        switch downloadMbps {
+        case 25...: return .good
+        case 5..<25: return .poor
+        default: return .dead
+        }
+    }
+}
+
 struct ConnectivityMapView: UIViewRepresentable {
     @Binding var startPoint: CLLocationCoordinate2D?
     @Binding var endPoint: CLLocationCoordinate2D?

@@ -49,7 +49,7 @@ struct ContentView: View {
         .onReceive(refreshTimer) { _ in
             if !hasCenteredOnFix && UserStore.shared.hasFix {
                 hasCenteredOnFix = true
-                generateTestCircles()
+                loadCircles()
             }
             lastLocation = CLLocation(
                 latitude: UserStore.shared.coordinate.latitude,
@@ -59,7 +59,7 @@ struct ContentView: View {
         .onAppear {
             UserStore.shared.requestPermissions()
             UserStore.shared.startUpdates()
-            generateTestCircles()
+            loadCircles()
         }
         .onReceive(speedTestTimer) { _ in
             BackgroundTaskManager.shared.runSpeedTestAndLog()
@@ -150,35 +150,22 @@ struct ContentView: View {
         routeCoordinates = [start, end]
     }
     
-    private func generateTestCircles() {
-        let userCoord = UserStore.shared.coordinate
+    private func loadCircles() {
+        // Replace with your actual endpoint
+        guard let url = URL(string: "https://api.kalculator.lol/calculated?since=0") else { return }
 
-        circles = [
-            SignalCircle(
-                coordinate: CLLocationCoordinate2D(
-                    latitude: userCoord.latitude + 0.002,
-                    longitude: userCoord.longitude + 0.002
-                ),
-                radius: 150,
-                tier: .good
-            ),
-            SignalCircle(
-                coordinate: CLLocationCoordinate2D(
-                    latitude: userCoord.latitude - 0.001,
-                    longitude: userCoord.longitude + 0.003
-                ),
-                radius: 100,
-                tier: .poor
-            ),
-            SignalCircle(
-                coordinate: CLLocationCoordinate2D(
-                    latitude: userCoord.latitude + 0.0015,
-                    longitude: userCoord.longitude - 0.002
-                ),
-                radius: 80,
-                tier: .dead
-            )
-        ]
+        NetworkClient.shared.get(url: url, as: [SignalCircleJSON].self) { fetched, error in
+            DispatchQueue.main.async {
+                if let error = error {
+                    print("Failed to load circles: \(error)")
+                    return
+                }
+                guard let fetched = fetched else {
+                    return
+                }
+                circles = fetched.map { $0.toSignalCircle() }
+            }
+        }
     }
 }
 

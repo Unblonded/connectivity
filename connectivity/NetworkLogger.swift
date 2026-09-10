@@ -18,7 +18,7 @@ final class NetworkLogger {
     static let shared = NetworkLogger()
 
     // Replace with your actual logging endpoint
-    private let endpoint = URL(string: "https://api.kalculator.lol/debug")!
+    private let endpoint = URL(string: "https://api.kalculator.lol/samples")!
 
     func logResult(_ result: SpeedTestResult, completion: ((Error?) -> Void)? = nil) {
         var dict = (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(result))) as? [String: Any] ?? [:]
