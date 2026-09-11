@@ -32,13 +32,6 @@ Simple Express API that collects raw speed samples, buckets them into a coarse l
 - `GET /samples` — raw samples
 - `GET /calculated?since=<id>` — aggregated, grid-averaged results
 
-```bash
-cd server
-npm install
-node index.js
-# listens on http://localhost:5000
-```
-
 ## iOS app
 
 Built with SwiftUI + MapKit. Requires Xcode and an Apple Developer account for device installs.
