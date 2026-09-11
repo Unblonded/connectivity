@@ -17,37 +17,50 @@ struct ContentView: View {
     @State private var lastLocation: CLLocation?
     @State private var hasCenteredOnFix = false
     @State private var showLegend = false
+    @State private var showSettings = false
     
+    @AppStorage("viewOnlyMode") private var viewOnlyMode: Bool = false
+
+    @AppStorage("speedTestIntervalSeconds") private var speedTestIntervalSeconds: Int = 5
+    @State private var speedTestCancellable: AnyCancellable?
+    
+
     private let refreshTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
-    private let speedTestTimer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
 
     var body: some View {
         ZStack(alignment: .bottom) {
             AppTheme.bg.ignoresSafeArea()
-            
-            ScrollView {
-                VStack(spacing: 0) {
-                    header
-                    
-                    ConnectivityMapView(
-                        startPoint: $startPoint,
-                        endPoint: $endPoint,
-                        circles: $circles,
-                        routeCoordinates: routeCoordinates
-                    )
-                    .frame(height: 340)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .padding(12)
-                    
-                    sidebar
+
+            VStack(spacing: 0) {
+                header
+
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ConnectivityMapView(
+                            startPoint: $startPoint,
+                            endPoint: $endPoint,
+                            circles: $circles,
+                            routeCoordinates: routeCoordinates
+                        )
+                        .frame(height: 500)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
                         .padding(12)
+
+                        sidebar
+                            .padding(12)
+                    }
+                    .padding(.bottom, 90) // room for the pill
                 }
-                .padding(.bottom, 90) // room for the pill
             }
-            
+
             userInfoPill
-            
-            if showLegend { legendOverlay }
+
+            if showLegend {
+                legendOverlay
+            }
+        }
+        .sheet(isPresented: $showSettings) {
+            SettingsView()
         }
         .onReceive(refreshTimer) { _ in
             if !hasCenteredOnFix && UserStore.shared.hasFix {
@@ -63,26 +76,27 @@ struct ContentView: View {
             UserStore.shared.requestPermissions()
             UserStore.shared.startUpdates()
             loadCircles()
+            restartSpeedTestTimer()
         }
-        .onReceive(speedTestTimer) { _ in
-            BackgroundTaskManager.shared.runSpeedTestAndLog()
+        .onChange(of: speedTestIntervalSeconds) {
+            restartSpeedTestTimer()
         }
     }
 
     private var header: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             Circle()
                 .fill(Color(red: 0.016, green: 0.165, blue: 0.227))
-                .frame(width: 36, height: 36)
+                .frame(width: 30, height: 30)
                 .overlay(
                     Image(systemName: "antenna.radiowaves.left.and.right")
                         .foregroundStyle(AppTheme.accent)
-                        .font(.system(size: 14))
+                        .font(.system(size: 12))
                 )
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 1) {
                 Text("Connectivity").bold()
                 Text("Find and avoid low-signal areas")
-                    .font(.caption)
+                    .font(.caption2)
                     .foregroundStyle(AppTheme.muted)
             }
             Spacer()
@@ -93,10 +107,20 @@ struct ContentView: View {
             } label: {
                 Image(systemName: "info.circle")
                     .foregroundStyle(AppTheme.accent)
-                    .font(.system(size: 18))
+                    .font(.system(size: 16))
+            }
+            Spacer().frame(width: 10)
+            Button {
+                showSettings = true
+            } label: {
+                Image(systemName: "gearshape")
+                    .foregroundStyle(AppTheme.accent)
+                    .font(.system(size: 16))
             }
         }
-        .padding()
+        .padding(.horizontal)
+        .padding(.top, 4)
+        .padding(.bottom, 8)
         .background(Color(red: 0.024, green: 0.055, blue: 0.078).opacity(0.98))
     }
 
@@ -158,7 +182,7 @@ struct ContentView: View {
         // low-signal-avoidance algorithm once that logic is defined.
         routeCoordinates = [start, end]
     }
-    
+
     private func loadCircles() {
         // Replace with your actual endpoint
         guard let url = URL(string: "https://api.kalculator.lol/calculated?since=0") else { return }
@@ -176,11 +200,10 @@ struct ContentView: View {
             }
         }
     }
-    
+
     private var legendOverlay: some View {
         ZStack {
             Color.black.opacity(0.7)
-                //.background(.ultraThinMaterial)
                 .ignoresSafeArea()
                 .onTapGesture {
                     withAnimation(.easeOut(duration: 0.2)) {
@@ -221,6 +244,18 @@ struct ContentView: View {
             .shadow(radius: 20)
             .transition(.scale.combined(with: .opacity))
         }
+    }
+
+    private func restartSpeedTestTimer() {
+        speedTestCancellable?.cancel()
+
+        guard !viewOnlyMode else { return }
+
+        speedTestCancellable = Timer.publish(every: Double(speedTestIntervalSeconds), on: .main, in: .common)
+            .autoconnect()
+            .sink { _ in
+                BackgroundTaskManager.shared.runSpeedTestAndLog()
+            }
     }
 }
 
