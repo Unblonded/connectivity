@@ -16,6 +16,7 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+
     - name: Build
       run: |
         xcodebuild build \
@@ -23,6 +24,7 @@ jobs:
           -scheme connectivity \
           -destination 'generic/platform=iOS Simulator' \
           CODE_SIGNING_ALLOWED=NO
+
     - name: Run tests
       run: |
         xcodebuild test \
@@ -30,3 +32,24 @@ jobs:
           -scheme connectivity \
           -destination 'platform=iOS Simulator,name=iPhone 17,OS=latest' \
           CODE_SIGNING_ALLOWED=NO
+
+    - name: Archive
+      run: |
+        xcodebuild archive \
+          -project connectivity.xcodeproj \
+          -scheme connectivity \
+          -archivePath $RUNNER_TEMP/connectivity.xcarchive \
+          -destination 'generic/platform=iOS'
+
+    - name: Export IPA
+      run: |
+        xcodebuild -exportArchive \
+          -archivePath $RUNNER_TEMP/connectivity.xcarchive \
+          -exportPath $RUNNER_TEMP/export \
+          -exportOptionsPlist ExportOptions.plist
+
+    - name: Upload IPA
+      uses: actions/upload-artifact@v4
+      with:
+        name: connectivity-ipa
+        path: ${{ runner.temp }}/export/*.ipa
