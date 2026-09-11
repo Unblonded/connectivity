@@ -55,6 +55,19 @@ final class UserStore: NSObject, CLLocationManagerDelegate, @unchecked Sendable 
         manager.stopUpdatingLocation()
     }
 
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        switch manager.authorizationStatus {
+        case .authorizedWhenInUse:
+            manager.requestAlwaysAuthorization()
+        case .authorizedAlways:
+            startUpdates()
+        case .denied, .restricted:
+            break
+        default:
+            break
+        }
+    }
+
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let latest = locations.last else { return }
         lock.lock(); _coordinate = latest.coordinate; lock.unlock()
