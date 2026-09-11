@@ -11,7 +11,7 @@ struct SignalCircle: Identifiable {
     let id = UUID()
     let coordinate: CLLocationCoordinate2D
     let radius: CLLocationDistance
-    let tier: SignalTier
+    let score: Int   // 0...100, from speedScore
 }
 
 struct SignalCircleJSON: Decodable {
@@ -35,17 +35,30 @@ struct SignalCircleJSON: Decodable {
         SignalCircle(
             coordinate: CLLocationCoordinate2D(latitude: loc.lat, longitude: loc.lon),
             radius: radius,
-            tier: tierFromSpeed(speed.downloadMbps)
+            score: speedScore(d: speed.downloadMbps, u: speed.uploadMbps)
         )
     }
+}
 
-    private func tierFromSpeed(_ downloadMbps: Double) -> SignalTier {
-        switch downloadMbps {
-        case 25...: return .good
-        case 5..<25: return .poor
-        default: return .dead
-        }
-    }
+// UIColor gradient version of colorForScore (UIKit context, not SwiftUI)
+func uiColorForScore(_ score: Int) -> UIColor {
+    let t = max(0.0, min(1.0, Double(score) / 100.0))
+
+    let dead:  (r: CGFloat, g: CGFloat, b: CGFloat) = (1.00, 0.42, 0.42)
+    let poor:  (r: CGFloat, g: CGFloat, b: CGFloat) = (1.00, 0.60, 0.30)
+    let good:  (r: CGFloat, g: CGFloat, b: CGFloat) = (0.09, 0.78, 0.48)
+
+    let (from, to, localT): ((r: CGFloat, g: CGFloat, b: CGFloat), (r: CGFloat, g: CGFloat, b: CGFloat), Double) =
+        t < 0.5
+        ? (dead, poor, t / 0.5)
+        : (poor, good, (t - 0.5) / 0.5)
+
+    let lt = CGFloat(localT)
+    let r = from.r + (to.r - from.r) * lt
+    let g = from.g + (to.g - from.g) * lt
+    let b = from.b + (to.b - from.b) * lt
+
+    return UIColor(red: r, green: g, blue: b, alpha: 1.0)
 }
 
 struct ConnectivityMapView: UIViewRepresentable {
@@ -73,7 +86,7 @@ struct ConnectivityMapView: UIViewRepresentable {
         map.removeOverlays(map.overlays)
 
         for circle in circles {
-            ConnectivityMapView.drawSignalCircle(on: map, at: circle.coordinate, radius: circle.radius, tier: circle.tier)
+            ConnectivityMapView.drawSignalCircle(on: map, at: circle.coordinate, radius: circle.radius, score: circle.score)
         }
 
         if let start = startPoint {
@@ -99,11 +112,11 @@ struct ConnectivityMapView: UIViewRepresentable {
     }
 
     final class SignalHeatOverlay: MKCircle {
-        var tier: SignalTier = .good
+        var score: Int = 0
         
-        convenience init(center: CLLocationCoordinate2D, radius: CLLocationDistance, tier: SignalTier) {
+        convenience init(center: CLLocationCoordinate2D, radius: CLLocationDistance, score: Int) {
             self.init(center: center, radius: radius)
-            self.tier = tier
+            self.score = score
         }
     }
 
@@ -112,8 +125,8 @@ struct ConnectivityMapView: UIViewRepresentable {
         on map: MKMapView,
         at location: CLLocationCoordinate2D,
         radius: CLLocationDistance,
-        tier: SignalTier) -> SignalHeatOverlay {
-        let circle = SignalHeatOverlay(center: location, radius: radius, tier: tier)
+        score: Int) -> SignalHeatOverlay {
+        let circle = SignalHeatOverlay(center: location, radius: radius, score: score)
         map.addOverlay(circle)
         return circle
     }
@@ -159,19 +172,10 @@ struct ConnectivityMapView: UIViewRepresentable {
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
             if let circleOverlay = overlay as? SignalHeatOverlay {
                 let renderer = MKCircleRenderer(circle: circleOverlay)
-                
-                switch circleOverlay.tier {
-                case .good:
-                    renderer.fillColor = UIColor(red: 0.09, green: 0.78, blue: 0.48, alpha: 0.25)
-                    renderer.strokeColor = UIColor(red: 0.09, green: 0.78, blue: 0.48, alpha: 0.60)
-                case .poor:
-                    renderer.fillColor = UIColor(red: 1.00, green: 0.60, blue: 0.30, alpha: 0.25)
-                    renderer.strokeColor = UIColor(red: 1.00, green: 0.60, blue: 0.30, alpha: 0.60)
-                case .dead:
-                    renderer.fillColor = UIColor(red: 1.00, green: 0.42, blue: 0.42, alpha: 0.30)
-                    renderer.strokeColor = UIColor(red: 1.00, green: 0.42, blue: 0.42, alpha: 0.70)
-                }
-                
+                let base = uiColorForScore(circleOverlay.score)
+
+                renderer.fillColor = base.withAlphaComponent(0.25)
+                renderer.strokeColor = base.withAlphaComponent(0.65)
                 renderer.lineWidth = 1.5
                 return renderer
             }

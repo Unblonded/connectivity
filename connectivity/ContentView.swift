@@ -16,6 +16,7 @@ struct ContentView: View {
     @State private var routeCoordinates: [CLLocationCoordinate2D] = []
     @State private var lastLocation: CLLocation?
     @State private var hasCenteredOnFix = false
+    @State private var showLegend = false
     
     private let refreshTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     private let speedTestTimer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
@@ -23,11 +24,11 @@ struct ContentView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             AppTheme.bg.ignoresSafeArea()
-
+            
             ScrollView {
                 VStack(spacing: 0) {
                     header
-
+                    
                     ConnectivityMapView(
                         startPoint: $startPoint,
                         endPoint: $endPoint,
@@ -37,14 +38,16 @@ struct ContentView: View {
                     .frame(height: 340)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                     .padding(12)
-
+                    
                     sidebar
                         .padding(12)
                 }
                 .padding(.bottom, 90) // room for the pill
             }
-
+            
             userInfoPill
+            
+            if showLegend { legendOverlay }
         }
         .onReceive(refreshTimer) { _ in
             if !hasCenteredOnFix && UserStore.shared.hasFix {
@@ -83,6 +86,15 @@ struct ContentView: View {
                     .foregroundStyle(AppTheme.muted)
             }
             Spacer()
+            Button {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    showLegend = true
+                }
+            } label: {
+                Image(systemName: "info.circle")
+                    .foregroundStyle(AppTheme.accent)
+                    .font(.system(size: 18))
+            }
         }
         .padding()
         .background(Color(red: 0.024, green: 0.055, blue: 0.078).opacity(0.98))
@@ -102,14 +114,6 @@ struct ContentView: View {
                         startPoint = nil; endPoint = nil; routeCoordinates = []
                     }
                 }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Legend").bold()
-                    legendRow(color: SignalTier.good.color, label: "Good signal")
-                    legendRow(color: SignalTier.poor.color, label: "Poor signal")
-                    legendRow(color: SignalTier.dead.color, label: "Dead zone")
-                }
-                .padding(.top, 8)
             }
         }
         .padding()
@@ -173,19 +177,50 @@ struct ContentView: View {
         }
     }
     
-    func speedScore(d: Double, u: Double) -> Int {
-        //to be determined still
-        let downWeight = 0.7
-        let upWeight = 0.3
+    private var legendOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.7)
+                //.background(.ultraThinMaterial)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        showLegend = false
+                    }
+                }
 
-        let maxDown = 100.0
-        let maxUp = 50.0
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    Text("Scoring Guide").bold()
+                    Spacer()
+                    Button {
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            showLegend = false
+                        }
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(AppTheme.muted)
+                    }
+                }
 
-        let downScore = log10(1 + min(d, maxDown)) / log10(1 + maxDown)
-        let upScore = log10(1 + min(u, maxUp)) / log10(1 + maxUp)
+                Text("Score blends download (70%) and upload (30%) speed on a logarithmic scale.")
+                    .font(.footnote)
+                    .foregroundStyle(AppTheme.muted)
 
-        let combined = (downScore * downWeight) + (upScore * upWeight)
-        return Int((combined * 100).rounded())
+                VStack(alignment: .leading, spacing: 10) {
+                    legendRow(color: colorForScore(100), label: "Excellent")
+                    legendRow(color: colorForScore(75), label: "Good")
+                    legendRow(color: colorForScore(50), label: "Fair")
+                    legendRow(color: colorForScore(25), label: "Weak")
+                    legendRow(color: colorForScore(0), label: "Dead zone")
+                }
+            }
+            .padding(20)
+            .frame(maxWidth: 300)
+            .background(Color(red: 0.024, green: 0.055, blue: 0.078))
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .shadow(radius: 20)
+            .transition(.scale.combined(with: .opacity))
+        }
     }
 }
 
