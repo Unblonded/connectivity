@@ -21,6 +21,9 @@ struct ContentView: View {
     
     @AppStorage("viewOnlyMode") private var viewOnlyMode: Bool = false
 
+    @AppStorage("mapRefreshIntervalSeconds") private var mapRefreshIntervalSeconds: Int = 60
+    @State private var mapRefreshCancellable: AnyCancellable?
+    
     @AppStorage("speedTestIntervalSeconds") private var speedTestIntervalSeconds: Int = 5
     @State private var speedTestCancellable: AnyCancellable?
     
@@ -77,9 +80,16 @@ struct ContentView: View {
             UserStore.shared.startUpdates()
             loadCircles()
             restartSpeedTestTimer()
+            restartMapRefreshTimer()
         }
         .onChange(of: speedTestIntervalSeconds) {
             restartSpeedTestTimer()
+        }
+        .onChange(of: viewOnlyMode) {
+            restartSpeedTestTimer()
+        }
+        .onChange(of: mapRefreshIntervalSeconds) {
+            restartMapRefreshTimer()
         }
     }
 
@@ -99,7 +109,16 @@ struct ContentView: View {
                     .font(.caption2)
                     .foregroundStyle(AppTheme.muted)
             }
+            
             Spacer()
+            Button {
+                loadCircles()
+            } label: {
+                Image(systemName: "arrow.clockwise")
+                    .foregroundStyle(AppTheme.accent)
+                    .font(.system(size: 16))
+            }
+            Spacer().frame(width: 10)
             Button {
                 withAnimation(.easeOut(duration: 0.2)) {
                     showLegend = true
@@ -255,7 +274,16 @@ struct ContentView: View {
             .autoconnect()
             .sink { _ in
                 BackgroundTaskManager.shared.runSpeedTestAndLog()
-            }
+        }
+    }
+    
+    private func restartMapRefreshTimer() {
+        mapRefreshCancellable?.cancel()
+        mapRefreshCancellable = Timer.publish(every: Double(mapRefreshIntervalSeconds), on: .main, in: .common)
+            .autoconnect()
+            .sink { _ in
+                loadCircles()
+        }
     }
 }
 

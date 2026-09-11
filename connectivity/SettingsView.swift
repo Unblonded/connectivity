@@ -30,6 +30,26 @@ enum DownloadTestSize: String, CaseIterable, Identifiable {
     }
 }
 
+enum MapRefreshInterval: Int, CaseIterable, Identifiable {
+    case sec30 = 30
+    case min1 = 60
+    case min5 = 300
+    case min15 = 900
+    case min30 = 1800
+
+    var id: Int { rawValue }
+
+    var label: String {
+        switch self {
+        case .sec30: return "30 seconds"
+        case .min1: return "1 minute"
+        case .min5: return "5 minutes"
+        case .min15: return "15 minutes"
+        case .min30: return "30 minutes"
+        }
+    }
+}
+
 enum SpeedTestInterval: Int, CaseIterable, Identifiable {
     case sec1 = 1
     case sec5 = 5
@@ -81,7 +101,15 @@ struct SettingsView: View {
     @AppStorage("uploadPayloadSize") private var uploadPayloadSizeRaw: Int = UploadPayloadSize.mb2.rawValue
     @AppStorage("speedTestIntervalSeconds") private var speedTestIntervalRaw: Int = SpeedTestInterval.sec5.rawValue
     @AppStorage("viewOnlyMode") private var viewOnlyMode: Bool = false
+    @AppStorage("mapRefreshIntervalSeconds") private var mapRefreshIntervalRaw: Int = MapRefreshInterval.min1.rawValue
 
+    private var mapRefreshInterval: Binding<MapRefreshInterval> {
+        Binding(
+            get: { MapRefreshInterval(rawValue: mapRefreshIntervalRaw) ?? .min1 },
+            set: { mapRefreshIntervalRaw = $0.rawValue }
+        )
+    }
+    
     private var speedTestInterval: Binding<SpeedTestInterval> {
         Binding(
             get: { SpeedTestInterval(rawValue: speedTestIntervalRaw) ?? .sec5 },
@@ -136,11 +164,19 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
                 
-                Section {
+                Section("Viewing Options") {
                     Toggle("View only mode", isOn: $viewOnlyMode)
                     Text("When enabled, the app shows the connectivity map without running speed tests or submitting your data.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                }
+                
+                Section("Map refresh") {
+                    Picker("Refresh map every", selection: mapRefreshInterval) {
+                        ForEach(MapRefreshInterval.allCases) { interval in
+                            Text(interval.label).tag(interval)
+                        }
+                    }
                 }
             }
             .navigationTitle("Settings")
