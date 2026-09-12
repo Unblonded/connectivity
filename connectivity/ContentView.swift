@@ -20,7 +20,8 @@ struct ContentView: View {
     @State private var showSettings = false
     
     @AppStorage("viewOnlyMode") private var viewOnlyMode: Bool = false
-
+    @AppStorage("keepScreenAwake") private var keepScreenAwake: Bool = false
+    
     @AppStorage("mapRefreshIntervalSeconds") private var mapRefreshIntervalSeconds: Int = 60
     @State private var mapRefreshCancellable: AnyCancellable?
     
@@ -81,16 +82,12 @@ struct ContentView: View {
             loadCircles()
             restartSpeedTestTimer()
             restartMapRefreshTimer()
+            UIApplication.shared.isIdleTimerDisabled = keepScreenAwake
         }
-        .onChange(of: speedTestIntervalSeconds) {
-            restartSpeedTestTimer()
-        }
-        .onChange(of: viewOnlyMode) {
-            restartSpeedTestTimer()
-        }
-        .onChange(of: mapRefreshIntervalSeconds) {
-            restartMapRefreshTimer()
-        }
+        .onChange(of: speedTestIntervalSeconds) { restartSpeedTestTimer() }
+        .onChange(of: viewOnlyMode) { restartSpeedTestTimer() }
+        .onChange(of: mapRefreshIntervalSeconds) { restartMapRefreshTimer() }
+        .onChange(of: keepScreenAwake) { UIApplication.shared.isIdleTimerDisabled = keepScreenAwake }
     }
 
     private var header: some View {

@@ -102,6 +102,7 @@ struct SettingsView: View {
     @AppStorage("speedTestIntervalSeconds") private var speedTestIntervalRaw: Int = SpeedTestInterval.sec5.rawValue
     @AppStorage("viewOnlyMode") private var viewOnlyMode: Bool = false
     @AppStorage("mapRefreshIntervalSeconds") private var mapRefreshIntervalRaw: Int = MapRefreshInterval.min1.rawValue
+    @AppStorage("keepScreenAwake") private var keepScreenAwake: Bool = false
 
     private var mapRefreshInterval: Binding<MapRefreshInterval> {
         Binding(
@@ -177,6 +178,13 @@ struct SettingsView: View {
                             Text(interval.label).tag(interval)
                         }
                     }
+                }
+                
+                Section("Display Idle Timeout") {
+                    Toggle("Keep screen awake", isOn: $keepScreenAwake)
+                    Text("Prevents your device from locking while the app is open. Uses more battery.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
             }
             .navigationTitle("Settings")

@@ -40,6 +40,16 @@ struct SignalCircleJSON: Decodable {
     }
 }
 
+final class SpeedLabelAnnotation: NSObject, MKAnnotation {
+    let coordinate: CLLocationCoordinate2D
+    let score: Int
+
+    init(coordinate: CLLocationCoordinate2D, score: Int) {
+        self.coordinate = coordinate
+        self.score = score
+    }
+}
+
 // UIColor gradient version of colorForScore (UIKit context, not SwiftUI)
 func uiColorForScore(_ score: Int) -> UIColor {
     let t = max(0.0, min(1.0, Double(score) / 100.0))
@@ -128,6 +138,7 @@ struct ConnectivityMapView: UIViewRepresentable {
         score: Int) -> SignalHeatOverlay {
         let circle = SignalHeatOverlay(center: location, radius: radius, score: score)
         map.addOverlay(circle)
+        map.addAnnotation(SpeedLabelAnnotation(coordinate: location, score: score))
         return circle
     }
 
@@ -163,6 +174,20 @@ struct ConnectivityMapView: UIViewRepresentable {
             if annotation is MKUserLocation {
                 return nil
             }
+
+            if let speedAnnotation = annotation as? SpeedLabelAnnotation {
+                let identifier = "speedLabel"
+                let view = mapView.dequeueReusableAnnotationView(withIdentifier: identifier) as? MKMarkerAnnotationView
+                    ?? MKMarkerAnnotationView(annotation: annotation, reuseIdentifier: identifier)
+
+                view.annotation = annotation
+                view.glyphText = "\(speedAnnotation.score)"
+                view.markerTintColor = uiColorForScore(speedAnnotation.score)
+                view.canShowCallout = false
+                view.displayPriority = .required
+                return view
+            }
+
             let pinView = MKMarkerAnnotationView(annotation: annotation, reuseIdentifier: "pin")
             pinView.markerTintColor = .systemRed
             pinView.canShowCallout = true
