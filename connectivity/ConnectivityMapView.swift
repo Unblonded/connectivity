@@ -76,6 +76,7 @@ struct ConnectivityMapView: UIViewRepresentable {
     @Binding var endPoint: CLLocationCoordinate2D?
     @Binding var circles: [SignalCircle]
     var routeCoordinates: [CLLocationCoordinate2D]
+    @Binding var recenterMap: Bool
 
     func makeUIView(context: Context) -> MKMapView {
         let map = MKMapView()
@@ -91,6 +92,16 @@ struct ConnectivityMapView: UIViewRepresentable {
     }
 
     func updateUIView(_ map: MKMapView, context: Context) {
+        if recenterMap {
+            let coord = UserStore.shared.coordinate
+            let region = MKCoordinateRegion(
+                center: coord,
+                span: MKCoordinateSpan(latitudeDelta: 0.02, longitudeDelta: 0.02)
+            )
+            map.setRegion(region, animated: true)
+            DispatchQueue.main.async { self.recenterMap = false }
+        }
+        
         let customAnnotations = map.annotations.filter { !($0 is MKUserLocation) }
         map.removeAnnotations(customAnnotations)
         map.removeOverlays(map.overlays)

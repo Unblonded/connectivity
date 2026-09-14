@@ -18,6 +18,7 @@ struct ContentView: View {
     @State private var hasCenteredOnFix = false
     @State private var showLegend = false
     @State private var showSettings = false
+    @State private var recenterMap: Bool = false
     
     @AppStorage("viewOnlyMode") private var viewOnlyMode: Bool = false
     @AppStorage("keepScreenAwake") private var keepScreenAwake: Bool = false
@@ -44,7 +45,8 @@ struct ContentView: View {
                             startPoint: $startPoint,
                             endPoint: $endPoint,
                             circles: $circles,
-                            routeCoordinates: routeCoordinates
+                            routeCoordinates: routeCoordinates,
+                            recenterMap: $recenterMap
                         )
                         .frame(height: 500)
                         .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -130,6 +132,14 @@ struct ContentView: View {
                 showSettings = true
             } label: {
                 Image(systemName: "gearshape")
+                    .foregroundStyle(AppTheme.accent)
+                    .font(.system(size: 16))
+            }
+            Spacer().frame(width: 10)
+            Button {
+                recenterMap = true
+            } label: {
+                Image(systemName: "location.fill")
                     .foregroundStyle(AppTheme.accent)
                     .font(.system(size: 16))
             }
