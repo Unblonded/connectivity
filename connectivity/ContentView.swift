@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import MapKit
 import CoreLocation
 import Combine
 
@@ -204,9 +205,37 @@ struct ContentView: View {
 
     private func generateRoute() {
         guard let start = startPoint, let end = endPoint else { return }
-        // Placeholder: straight line. Swap in MKDirections or your
-        // low-signal-avoidance algorithm once that logic is defined.
-        routeCoordinates = [start, end]
+        
+        let request = MKDirections.Request()
+        request.source = MKMapItem(placemark: MKPlacemark(coordinate: start))
+        request.destination = MKMapItem(placemark: MKPlacemark(coordinate: end))
+        request.transportType = .automobile
+        request.requestsAlternateRoutes = true // get up to 3 routes to compare
+        
+        MKDirections(request: request).calculate { response, error in
+            guard let routes = response?.routes, !routes.isEmpty else {
+                print("Route error: \(error?.localizedDescription ?? "unknown")")
+                return
+            }
+            
+            // Print all route scores so you can verify
+            routes.enumerated().forEach { i, route in
+                let score = self.scoreRoute(route)
+                print("Route \(i): \(route.name) — signal score: \(String(format: "%.1f", score)) — ETA: \(Int(route.expectedTravelTime / 60))min")
+            }
+            
+            let best = routes.max(by: { scoreRoute($0) < scoreRoute($1) })
+            
+            DispatchQueue.main.async {
+                if let best = best {
+                    print("Chose: \(best.name) as best signal route")
+                    let pointCount = best.polyline.pointCount
+                    var coords = [CLLocationCoordinate2D](repeating: .init(), count: pointCount)
+                    best.polyline.getCoordinates(&coords, range: NSRange(location: 0, length: pointCount))
+                    routeCoordinates = coords
+                }
+            }
+        }
     }
 
     private func loadCircles() {
@@ -291,6 +320,46 @@ struct ContentView: View {
             .sink { _ in
                 loadCircles()
         }
+    }
+    
+    private func scoreRoute(_ route: MKRoute) -> Double {
+        guard !circles.isEmpty else { return 0 }
+        
+        let pointCount = route.polyline.pointCount
+        var coords = [CLLocationCoordinate2D](repeating: .init(), count: pointCount)
+        route.polyline.getCoordinates(&coords, range: NSRange(location: 0, length: pointCount))
+        
+        // Sample every 5th point so we're not checking thousands
+        let sampled = stride(from: 0, to: coords.count, by: 5).map { coords[$0] }
+        
+        var totalScore = 0.0
+        var matched = 0
+        
+        for point in sampled {
+            let pointLocation = CLLocation(latitude: point.latitude, longitude: point.longitude)
+            
+            // Find the closest circle to this point
+            if let closest = circles.min(by: { a, b in
+                let aLoc = CLLocation(latitude: a.coordinate.latitude, longitude: a.coordinate.longitude)
+                let bLoc = CLLocation(latitude: b.coordinate.latitude, longitude: b.coordinate.longitude)
+                return aLoc.distance(from: pointLocation) < bLoc.distance(from: pointLocation)
+            })
+            {
+                let distance = CLLocation(
+                    latitude: closest.coordinate.latitude,
+                    longitude: closest.coordinate.longitude
+                ).distance(from: pointLocation)
+                
+                // Only count it if the point is actually inside the circle
+                if distance <= closest.radius {
+                    totalScore += Double(closest.score)
+                    matched += 1
+                }
+            }
+        }
+        
+        // If no circles matched, return neutral score
+        return matched > 0 ? totalScore / Double(matched) : 50.0
     }
 }
 
