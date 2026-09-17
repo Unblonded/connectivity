@@ -207,8 +207,8 @@ struct ContentView: View {
         guard let start = startPoint, let end = endPoint else { return }
         
         let request = MKDirections.Request()
-        request.source = MKMapItem(placemark: MKPlacemark(coordinate: start))
-        request.destination = MKMapItem(placemark: MKPlacemark(coordinate: end))
+        request.source = MKMapItem(location: CLLocation(latitude: start.latitude, longitude: start.longitude), address: nil)
+        request.destination = MKMapItem(location: CLLocation(latitude: end.latitude, longitude: end.longitude), address: nil)
         request.transportType = .automobile
         request.requestsAlternateRoutes = true // get up to 3 routes to compare
         
