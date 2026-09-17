@@ -77,7 +77,7 @@ struct ConnectivityMapView: UIViewRepresentable {
     @Binding var circles: [SignalCircle]
     var routeCoordinates: [CLLocationCoordinate2D]
     @Binding var recenterMap: Bool
-
+    
     func makeUIView(context: Context) -> MKMapView {
         let map = MKMapView()
         map.delegate = context.coordinator
@@ -107,7 +107,12 @@ struct ConnectivityMapView: UIViewRepresentable {
         map.removeOverlays(map.overlays)
 
         for circle in circles {
-            ConnectivityMapView.drawSignalCircle(on: map, at: circle.coordinate, radius: circle.radius, score: circle.score)
+            ConnectivityMapView.drawSignalCircle(
+                on: map,
+                at: circle.coordinate,
+                radius: circle.radius,
+                score: circle.score,
+            )
         }
 
         if let start = startPoint {

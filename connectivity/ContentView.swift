@@ -10,6 +10,11 @@ import MapKit
 import CoreLocation
 import Combine
 
+enum AuthMode: Equatable {
+    case login
+    case register
+}
+
 struct ContentView: View {
     @State private var circles: [SignalCircle] = []
     @State private var startPoint: CLLocationCoordinate2D?
@@ -20,6 +25,10 @@ struct ContentView: View {
     @State private var showLegend = false
     @State private var showSettings = false
     @State private var recenterMap: Bool = false
+    
+    @AppStorage("isLoggedIn") private var isLoggedIn: Bool = false
+    @AppStorage("hasRegisteredBefore") private var hasRegisteredBefore: Bool = false
+    @AppStorage("userName") private var userName: String = ""
     
     @AppStorage("viewOnlyMode") private var viewOnlyMode: Bool = false
     @AppStorage("keepScreenAwake") private var keepScreenAwake: Bool = false
@@ -34,6 +43,48 @@ struct ContentView: View {
     private let refreshTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
+        Group {
+            if isLoggedIn {
+                mainContent
+            } else {
+                AuthView(initialMode: hasRegisteredBefore ? .login : .register) { username, mode in
+                    userName = username
+                    hasRegisteredBefore = true
+                    isLoggedIn = true
+                }
+            }
+        }
+        .onReceive(refreshTimer) { _ in
+            guard isLoggedIn else { return }
+
+            if !hasCenteredOnFix && UserStore.shared.hasFix {
+                hasCenteredOnFix = true
+                loadCircles()
+            }
+            lastLocation = CLLocation(
+                latitude: UserStore.shared.coordinate.latitude,
+                longitude: UserStore.shared.coordinate.longitude
+            )
+        }
+        .onAppear {
+            guard isLoggedIn else { return }
+            startAuthenticatedServices()
+        }
+        .onChange(of: isLoggedIn) {
+            if isLoggedIn {
+                startAuthenticatedServices()
+            } else {
+                stopAuthenticatedServices()
+            }
+        }
+        .onChange(of: speedTestIntervalSeconds) { restartSpeedTestTimer() }
+        .onChange(of: viewOnlyMode) { restartSpeedTestTimer() }
+        .onChange(of: mapRefreshIntervalSeconds) { restartMapRefreshTimer() }
+        .onChange(of: keepScreenAwake) { UIApplication.shared.isIdleTimerDisabled = isLoggedIn && keepScreenAwake }
+        .preferredColorScheme(.dark)
+    }
+
+    private var mainContent: some View {
         ZStack(alignment: .bottom) {
             AppTheme.bg.ignoresSafeArea()
 
@@ -68,33 +119,13 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showSettings) {
             SettingsView()
+                .preferredColorScheme(.dark)
         }
-        .onReceive(refreshTimer) { _ in
-            if !hasCenteredOnFix && UserStore.shared.hasFix {
-                hasCenteredOnFix = true
-                loadCircles()
-            }
-            lastLocation = CLLocation(
-                latitude: UserStore.shared.coordinate.latitude,
-                longitude: UserStore.shared.coordinate.longitude
-            )
-        }
-        .onAppear {
-            UserStore.shared.requestPermissions()
-            UserStore.shared.startUpdates()
-            loadCircles()
-            restartSpeedTestTimer()
-            restartMapRefreshTimer()
-            UIApplication.shared.isIdleTimerDisabled = keepScreenAwake
-        }
-        .onChange(of: speedTestIntervalSeconds) { restartSpeedTestTimer() }
-        .onChange(of: viewOnlyMode) { restartSpeedTestTimer() }
-        .onChange(of: mapRefreshIntervalSeconds) { restartMapRefreshTimer() }
-        .onChange(of: keepScreenAwake) { UIApplication.shared.isIdleTimerDisabled = keepScreenAwake }
+        .foregroundStyle(.white)
     }
 
     private var header: some View {
-        HStack(spacing: 10) {
+        HStack(alignment: .top, spacing: 10) {
             Circle()
                 .fill(Color(red: 0.016, green: 0.165, blue: 0.227))
                 .frame(width: 30, height: 30)
@@ -103,52 +134,64 @@ struct ContentView: View {
                         .foregroundStyle(AppTheme.accent)
                         .font(.system(size: 12))
                 )
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Connectivity").bold()
-                Text("Find and avoid low-signal areas")
+                .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Connectivity")
+                    .font(.headline)
+                    .lineLimit(1)
+                Text(userName.isEmpty ? "Find and avoid low-signal areas" : "Signed in as \(userName)")
                     .font(.caption2)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
                     .foregroundStyle(AppTheme.muted)
             }
+            .padding(.top, 1)
             
-            Spacer()
-            Button {
-                loadCircles()
-            } label: {
-                Image(systemName: "arrow.clockwise")
-                    .foregroundStyle(AppTheme.accent)
-                    .font(.system(size: 16))
-            }
-            Spacer().frame(width: 10)
-            Button {
-                withAnimation(.easeOut(duration: 0.2)) {
-                    showLegend = true
+            Spacer(minLength: 8)
+
+            HStack(spacing: 14) {
+                headerButton(systemName: "location.fill") {
+                    recenterMap = true
                 }
-            } label: {
-                Image(systemName: "info.circle")
-                    .foregroundStyle(AppTheme.accent)
-                    .font(.system(size: 16))
+
+                headerButton(systemName: "arrow.clockwise") {
+                    loadCircles()
+                }
+
+                headerButton(systemName: "info.circle") {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        showLegend = true
+                    }
+                }
+
+                headerButton(systemName: "gearshape") {
+                    showSettings = true
+                }
+
+                Divider()
+                    .frame(height: 18)
+                    .overlay(AppTheme.muted.opacity(0.4))
+
+                headerButton(systemName: "rectangle.portrait.and.arrow.right") {
+                    logout()
+                }
             }
-            Spacer().frame(width: 10)
-            Button {
-                showSettings = true
-            } label: {
-                Image(systemName: "gearshape")
-                    .foregroundStyle(AppTheme.accent)
-                    .font(.system(size: 16))
-            }
-            Spacer().frame(width: 10)
-            Button {
-                recenterMap = true
-            } label: {
-                Image(systemName: "location.fill")
-                    .foregroundStyle(AppTheme.accent)
-                    .font(.system(size: 16))
-            }
+            .padding(.top, 5)
         }
         .padding(.horizontal)
-        .padding(.top, 4)
+        .padding(.top, 10)
         .padding(.bottom, 8)
         .background(Color(red: 0.024, green: 0.055, blue: 0.078).opacity(0.98))
+    }
+
+    private func headerButton(systemName: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .foregroundStyle(AppTheme.accent)
+                .font(.system(size: 16, weight: .semibold))
+                .frame(width: 22, height: 22)
+        }
+        .buttonStyle(.plain)
     }
 
     private var sidebar: some View {
@@ -168,6 +211,7 @@ struct ContentView: View {
             }
         }
         .padding()
+        .foregroundStyle(.white)
         .background(Color.white.opacity(0.02))
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
@@ -239,6 +283,8 @@ struct ContentView: View {
     }
 
     private func loadCircles() {
+        guard isLoggedIn else { return }
+
         // Replace with your actual endpoint
         guard let url = URL(string: "https://api.kalculator.lol/calculated?since=0") else { return }
 
@@ -294,6 +340,7 @@ struct ContentView: View {
             }
             .padding(20)
             .frame(maxWidth: 300)
+            .foregroundStyle(.white)
             .background(Color(red: 0.024, green: 0.055, blue: 0.078))
             .clipShape(RoundedRectangle(cornerRadius: 16))
             .shadow(radius: 20)
@@ -301,20 +348,55 @@ struct ContentView: View {
         }
     }
 
+    private func startAuthenticatedServices() {
+        UserStore.shared.requestPermissions()
+        UserStore.shared.startUpdates()
+        loadCircles()
+        restartSpeedTestTimer()
+        restartMapRefreshTimer()
+        UIApplication.shared.isIdleTimerDisabled = keepScreenAwake
+    }
+
+    private func stopAuthenticatedServices() {
+        speedTestCancellable?.cancel()
+        mapRefreshCancellable?.cancel()
+        speedTestCancellable = nil
+        mapRefreshCancellable = nil
+        UIApplication.shared.isIdleTimerDisabled = false
+        UserStore.shared.stopUpdates()
+    }
+
+    private func logout() {
+        isLoggedIn = false
+        userName = ""
+        circles = []
+        startPoint = nil
+        endPoint = nil
+        routeCoordinates = []
+        lastLocation = nil
+        hasCenteredOnFix = false
+        showLegend = false
+        showSettings = false
+    }
+
     private func restartSpeedTestTimer() {
         speedTestCancellable?.cancel()
 
-        guard !viewOnlyMode else { return }
+        guard isLoggedIn, !viewOnlyMode else { return }
 
         speedTestCancellable = Timer.publish(every: Double(speedTestIntervalSeconds), on: .main, in: .common)
             .autoconnect()
             .sink { _ in
+                guard isLoggedIn else { return }
                 BackgroundTaskManager.shared.runSpeedTestAndLog()
         }
     }
     
     private func restartMapRefreshTimer() {
         mapRefreshCancellable?.cancel()
+
+        guard isLoggedIn else { return }
+
         mapRefreshCancellable = Timer.publish(every: Double(mapRefreshIntervalSeconds), on: .main, in: .common)
             .autoconnect()
             .sink { _ in
@@ -363,8 +445,157 @@ struct ContentView: View {
     }
 }
 
-/*
+private struct AuthView: View {
+    @State private var mode: AuthMode
+    @State private var username = ""
+    @State private var password = ""
+    @State private var errorMessage: String?
+    @State private var isSubmitting = false
+
+    let onAuthenticated: (String, AuthMode) -> Void
+
+    init(initialMode: AuthMode, onAuthenticated: @escaping (String, AuthMode) -> Void) {
+        _mode = State(initialValue: initialMode)
+        self.onAuthenticated = onAuthenticated
+    }
+
+    private var canSubmit: Bool {
+        !isSubmitting && !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !password.isEmpty
+    }
+
+    private var title: String {
+        mode == .register ? "Create Account" : "Log In"
+    }
+
+    private var subtitle: String {
+        mode == .register
+            ? "Register before starting location, map, and speed logging services."
+            : "Log in to start location, map, and speed logging services."
+    }
+
+    private var switchPrompt: String {
+        mode == .register ? "Already have an account? Log in" : "Need an account? Register"
+    }
+
+    var body: some View {
+        ZStack {
+            AppTheme.bg.ignoresSafeArea()
+
+            VStack(spacing: 24) {
+                VStack(spacing: 10) {
+                    Circle()
+                        .fill(Color(red: 0.016, green: 0.165, blue: 0.227))
+                        .frame(width: 64, height: 64)
+                        .overlay(
+                            Image(systemName: "antenna.radiowaves.left.and.right")
+                                .foregroundStyle(AppTheme.accent)
+                                .font(.system(size: 26))
+                        )
+
+                    Text("Connectivity")
+                        .font(.title2.bold())
+                        .foregroundStyle(.white)
+
+                    Text(subtitle)
+                        .font(.footnote)
+                        .foregroundStyle(AppTheme.muted)
+                        .multilineTextAlignment(.center)
+                }
+
+                VStack(spacing: 14) {
+                    TextField("Username", text: $username)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .textContentType(.username)
+                        .submitLabel(.next)
+                        .foregroundStyle(.white)
+                        .tint(AppTheme.accent)
+                        .padding(12)
+                        .background(Color.white.opacity(0.06))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                    SecureField("Password", text: $password)
+                        .textContentType(mode == .register ? .newPassword : .password)
+                        .submitLabel(.go)
+                        .onSubmit(submit)
+                        .foregroundStyle(.white)
+                        .tint(AppTheme.accent)
+                        .padding(12)
+                        .background(Color.white.opacity(0.06))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                    if let errorMessage {
+                        Text(errorMessage)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    Button(action: submit) {
+                        if isSubmitting {
+                            ProgressView()
+                                .frame(maxWidth: .infinity)
+                        } else {
+                            Text(title)
+                                .font(.headline)
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!canSubmit)
+
+                    Button(switchPrompt) {
+                        mode = mode == .register ? .login : .register
+                        errorMessage = nil
+                        password = ""
+                    }
+                    .font(.footnote)
+                    .foregroundStyle(AppTheme.accent)
+                    .padding(.top, 4)
+                }
+                .foregroundStyle(.white)
+            }
+            .padding(24)
+            .frame(maxWidth: 360)
+        }
+    }
+
+    private func submit() {
+        let trimmedUsername = username.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedUsername.isEmpty, !password.isEmpty else {
+            errorMessage = "Enter a username and password."
+            return
+        }
+
+        isSubmitting = true
+        errorMessage = nil
+
+        let completion: (Error?) -> Void = { error in
+            DispatchQueue.main.async {
+                isSubmitting = false
+
+                if error != nil {
+                    errorMessage = mode == .register
+                        ? "Registration failed. Try again."
+                        : "Login failed. Check your username and password."
+                    return
+                }
+
+                password = ""
+                onAuthenticated(trimmedUsername, mode)
+            }
+        }
+
+        if mode == .register {
+            NetworkLogger.shared.register(username: trimmedUsername, password: password, completion: completion)
+        } else {
+            NetworkLogger.shared.login(username: trimmedUsername, password: password, completion: completion)
+        }
+    }
+}
+
 #Preview {
     ContentView()
 }
-*/
+
+

@@ -143,7 +143,7 @@ struct SettingsView: View {
                     }
                     Text("Larger files give more accurate results on fast connections but take longer and use more data.")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppTheme.muted)
                 }
 
                 Section("Upload test") {
@@ -162,14 +162,14 @@ struct SettingsView: View {
                     }
                     Text("More frequent tests give a denser map but use more data.")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppTheme.muted)
                 }
                 
                 Section("Viewing Options") {
                     Toggle("View only mode", isOn: $viewOnlyMode)
                     Text("When enabled, the app shows the connectivity map without running speed tests or submitting your data.")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppTheme.muted)
                 }
                 
                 Section("Map refresh") {
@@ -184,9 +184,13 @@ struct SettingsView: View {
                     Toggle("Keep screen awake", isOn: $keepScreenAwake)
                     Text("Prevents your device from locking while the app is open. Uses more battery.")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppTheme.muted)
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(AppTheme.bg)
+            .foregroundStyle(.white)
+            .tint(AppTheme.accent)
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

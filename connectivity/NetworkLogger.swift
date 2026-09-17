@@ -14,21 +14,55 @@ struct SpeedTestResult: Codable {
     let uploadMbps: Double?
 }
 
+struct AuthRequest: Codable {
+    let username: String
+    let password: String
+}
+
 final class NetworkLogger {
     static let shared = NetworkLogger()
 
-    // Replace with your actual logging endpoint
-    private let endpoint = URL(string: "https://api.kalculator.lol/samples")!
+    private let sampleEndpoint = URL(string: "https://api.kalculator.lol/samples")!
+    private let registerEndpoint = URL(string: "https://api.kalculator.lol/register")!
+    private let loginEndpoint = URL(string: "https://api.kalculator.lol/login")!
+    
+    func register(username: String, password: String, completion: @escaping (Error?) -> Void) {
+        sendAuthRequest(to: registerEndpoint, username: username, password: password, completion: completion)
+    }
+
+    func login(username: String, password: String, completion: @escaping (Error?) -> Void) {
+        sendAuthRequest(to: loginEndpoint, username: username, password: password, completion: completion)
+    }
 
     func logResult(_ result: SpeedTestResult, completion: ((Error?) -> Void)? = nil) {
         // Update UserStore with latest speeds before sending
         UserStore.shared.updateSpeed(downloadMbps: result.downloadMbps, uploadMbps: result.uploadMbps)
 
-        var dict = (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(result))) as? [String: Any] ?? [:]
-        dict["token"] = "CONGRESSIONAL-APP-CHALLENGE-ANTI-SPAM"
-
-        guard let body = try? JSONSerialization.data(withJSONObject: dict) else {
+        guard let body = try? JSONEncoder().encode(result) else {
             completion?(NSError(domain: "NetworkLogger", code: -1))
+            return
+        }
+
+        var request = URLRequest(url: sampleEndpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+
+        URLSession.shared.dataTask(with: request) { _, response, error in
+            completion?(error)
+        }.resume()
+    }
+
+    private func sendAuthRequest(
+        to endpoint: URL,
+        username: String,
+        password: String,
+        completion: @escaping (Error?) -> Void
+    ) {
+        let authRequest = AuthRequest(username: username, password: password)
+
+        guard let body = try? JSONEncoder().encode(authRequest) else {
+            completion(NSError(domain: "NetworkLogger", code: -1))
             return
         }
 
@@ -38,7 +72,18 @@ final class NetworkLogger {
         request.httpBody = body
 
         URLSession.shared.dataTask(with: request) { _, response, error in
-            completion?(error)
+            if let error = error {
+                completion(error)
+                return
+            }
+
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200...299).contains(httpResponse.statusCode) else {
+                completion(NSError(domain: "NetworkLogger", code: -2))
+                return
+            }
+
+            completion(nil)
         }.resume()
     }
 }
