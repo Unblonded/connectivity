@@ -103,6 +103,7 @@ struct SettingsView: View {
     @AppStorage("viewOnlyMode") private var viewOnlyMode: Bool = false
     @AppStorage("mapRefreshIntervalSeconds") private var mapRefreshIntervalRaw: Int = MapRefreshInterval.min1.rawValue
     @AppStorage("keepScreenAwake") private var keepScreenAwake: Bool = false
+    @AppStorage("signalDataDisplayMode") private var signalDataDisplayModeRaw: String = SignalDataDisplayMode.numbersAndCircles.rawValue
 
     private var mapRefreshInterval: Binding<MapRefreshInterval> {
         Binding(
@@ -129,6 +130,13 @@ struct SettingsView: View {
         Binding(
             get: { UploadPayloadSize(rawValue: uploadPayloadSizeRaw) ?? .mb2 },
             set: { uploadPayloadSizeRaw = $0.rawValue }
+        )
+    }
+
+    private var signalDataDisplayMode: Binding<SignalDataDisplayMode> {
+        Binding(
+            get: { SignalDataDisplayMode(rawValue: signalDataDisplayModeRaw) ?? .numbersAndCircles },
+            set: { signalDataDisplayModeRaw = $0.rawValue }
         )
     }
 
@@ -170,6 +178,13 @@ struct SettingsView: View {
                     Text("When enabled, the app shows the connectivity map without running speed tests or submitting your data.")
                         .font(.footnote)
                         .foregroundStyle(AppTheme.muted)
+
+                    Picker("Data Display", selection: signalDataDisplayMode) {
+                        ForEach(SignalDataDisplayMode.allCases) { mode in
+                            Text(mode.label).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
                 }
                 
                 Section("Map refresh") {

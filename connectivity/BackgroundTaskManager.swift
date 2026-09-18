@@ -42,6 +42,12 @@ final class BackgroundTaskManager {
     }
 
     func runSpeedTestAndLog(completion: (() -> Void)? = nil) {
+        guard !NetworkStatusMonitor.shared.isUsingWiFi else {
+            UserStore.shared.updateSpeed(downloadMbps: nil, uploadMbps: nil)
+            completion?()
+            return
+        }
+
         SpeedTest.shared.measureDownload { downloadMbps, error in
             if let error = error {
                 print("Download test failed: \(error)")

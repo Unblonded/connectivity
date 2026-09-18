@@ -21,9 +21,13 @@ struct ContentView: View {
     @State private var endPoint: CLLocationCoordinate2D?
     @State private var routeCoordinates: [CLLocationCoordinate2D] = []
     @State private var lastLocation: CLLocation?
+    @State private var currentAddress = "Finding address..."
+    @State private var lastAddressLocation: CLLocation?
+    @State private var isResolvingAddress = false
     @State private var hasCenteredOnFix = false
     @State private var showLegend = false
     @State private var showSettings = false
+    @State private var showRouteBuilderPage = false
     @State private var recenterMap: Bool = false
     
     @AppStorage("isLoggedIn") private var isLoggedIn: Bool = false
@@ -32,6 +36,7 @@ struct ContentView: View {
     
     @AppStorage("viewOnlyMode") private var viewOnlyMode: Bool = false
     @AppStorage("keepScreenAwake") private var keepScreenAwake: Bool = false
+    @AppStorage("signalDataDisplayMode") private var signalDataDisplayModeRaw: String = SignalDataDisplayMode.numbersAndCircles.rawValue
     
     @AppStorage("mapRefreshIntervalSeconds") private var mapRefreshIntervalSeconds: Int = 60
     @State private var mapRefreshCancellable: AnyCancellable?
@@ -41,6 +46,10 @@ struct ContentView: View {
     
 
     private let refreshTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
+    private var signalDataDisplayMode: SignalDataDisplayMode {
+        SignalDataDisplayMode(rawValue: signalDataDisplayModeRaw) ?? .numbersAndCircles
+    }
 
     var body: some View {
         Group {
@@ -61,10 +70,12 @@ struct ContentView: View {
                 hasCenteredOnFix = true
                 loadCircles()
             }
-            lastLocation = CLLocation(
+            let updatedLocation = CLLocation(
                 latitude: UserStore.shared.coordinate.latitude,
                 longitude: UserStore.shared.coordinate.longitude
             )
+            lastLocation = updatedLocation
+            updateAddressIfNeeded(for: updatedLocation)
         }
         .onAppear {
             guard isLoggedIn else { return }
@@ -85,33 +96,30 @@ struct ContentView: View {
     }
 
     private var mainContent: some View {
-        ZStack(alignment: .bottom) {
+        ZStack {
             AppTheme.bg.ignoresSafeArea()
+
+            ConnectivityMapView(
+                startPoint: $startPoint,
+                endPoint: $endPoint,
+                circles: $circles,
+                routeCoordinates: [],
+                dataDisplayMode: signalDataDisplayMode,
+                showsRouteBuilderOverlays: false,
+                allowsRoutePointSelection: false,
+                recenterMap: $recenterMap
+            )
+            .ignoresSafeArea(edges: .bottom)
 
             VStack(spacing: 0) {
                 header
-
-                ScrollView {
-                    VStack(spacing: 0) {
-                        ConnectivityMapView(
-                            startPoint: $startPoint,
-                            endPoint: $endPoint,
-                            circles: $circles,
-                            routeCoordinates: routeCoordinates,
-                            recenterMap: $recenterMap
-                        )
-                        .frame(height: 500)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .padding(12)
-
-                        sidebar
-                            .padding(12)
-                    }
-                    .padding(.bottom, 90) // room for the pill
-                }
+                Spacer()
             }
 
-            userInfoPill
+            VStack {
+                Spacer()
+                userInfoPill
+            }
 
             if showLegend {
                 legendOverlay
@@ -121,31 +129,42 @@ struct ContentView: View {
             SettingsView()
                 .preferredColorScheme(.dark)
         }
+        .fullScreenCover(isPresented: $showRouteBuilderPage) {
+            routeBuilderPage
+                .preferredColorScheme(.dark)
+        }
         .foregroundStyle(.white)
     }
 
     private var header: some View {
         HStack(alignment: .top, spacing: 10) {
-            Circle()
-                .fill(Color(red: 0.016, green: 0.165, blue: 0.227))
-                .frame(width: 30, height: 30)
-                .overlay(
-                    Image(systemName: "antenna.radiowaves.left.and.right")
-                        .foregroundStyle(AppTheme.accent)
-                        .font(.system(size: 12))
-                )
-                .padding(.top, 2)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Connectivity")
-                    .font(.headline)
-                    .lineLimit(1)
-                Text(userName.isEmpty ? "Find and avoid low-signal areas" : "Signed in as \(userName)")
-                    .font(.caption2)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                    .foregroundStyle(AppTheme.muted)
+            Button {
+                showRouteBuilderPage = true
+            } label: {
+                HStack(alignment: .top, spacing: 10) {
+                    Circle()
+                        .fill(Color(red: 0.016, green: 0.165, blue: 0.227))
+                        .frame(width: 30, height: 30)
+                        .overlay(
+                            Image(systemName: "antenna.radiowaves.left.and.right")
+                                .foregroundStyle(AppTheme.accent)
+                                .font(.system(size: 12))
+                        )
+                        .padding(.top, 2)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Connectivity")
+                            .font(.headline)
+                            .lineLimit(1)
+                        Text(userName.isEmpty ? "Find and avoid low-signal areas" : "Open route builder")
+                            .font(.caption2)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                            .foregroundStyle(AppTheme.muted)
+                    }
+                    .padding(.top, 1)
+                }
             }
-            .padding(.top, 1)
+            .buttonStyle(.plain)
             
             Spacer(minLength: 8)
 
@@ -181,7 +200,12 @@ struct ContentView: View {
         .padding(.horizontal)
         .padding(.top, 10)
         .padding(.bottom, 8)
-        .background(Color(red: 0.024, green: 0.055, blue: 0.078).opacity(0.98))
+        .background(.ultraThinMaterial)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.white.opacity(0.08))
+                .frame(height: 1)
+        }
     }
 
     private func headerButton(systemName: String, action: @escaping () -> Void) -> some View {
@@ -194,26 +218,130 @@ struct ContentView: View {
         .buttonStyle(.plain)
     }
 
-    private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Route Builder").font(.headline)
-                Text("Tap map to set Start and End points.")
-                    .font(.caption)
-                    .foregroundStyle(AppTheme.muted)
-                HStack {
-                    Button("Generate Route") { generateRoute() }
-                        .buttonStyle(.borderedProminent)
-                    Button("Clear") {
-                        startPoint = nil; endPoint = nil; routeCoordinates = []
-                    }
-                }
+    private var routeBuilderPage: some View {
+        ZStack {
+            AppTheme.bg.ignoresSafeArea()
+
+            ConnectivityMapView(
+                startPoint: $startPoint,
+                endPoint: $endPoint,
+                circles: $circles,
+                routeCoordinates: routeCoordinates,
+                dataDisplayMode: signalDataDisplayMode,
+                showsRouteBuilderOverlays: true,
+                allowsRoutePointSelection: true,
+                recenterMap: $recenterMap
+            )
+            .ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                routeBuilderHeader
+                Spacer()
+                routeBuilderControls
             }
         }
-        .padding()
         .foregroundStyle(.white)
-        .background(Color.white.opacity(0.02))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var routeBuilderHeader: some View {
+        HStack(spacing: 12) {
+            Button {
+                showRouteBuilderPage = false
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 17, weight: .semibold))
+                    .frame(width: 34, height: 34)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(AppTheme.accent)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Route Builder")
+                    .font(.headline)
+                Text("Tap the map to place start and end points.")
+                    .font(.caption2)
+                    .foregroundStyle(AppTheme.muted)
+            }
+
+            Spacer()
+
+            headerButton(systemName: "location.fill") {
+                recenterMap = true
+            }
+        }
+        .padding(.horizontal)
+        .padding(.top, 10)
+        .padding(.bottom, 8)
+        .background(.ultraThinMaterial)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.white.opacity(0.08))
+                .frame(height: 1)
+        }
+    }
+
+    private var routeBuilderControls: some View {
+        VStack(spacing: 14) {
+            HStack(spacing: 10) {
+                routePointRow(title: "Start", coordinate: startPoint, symbol: "1.circle.fill")
+                routePointRow(title: "End", coordinate: endPoint, symbol: "2.circle.fill")
+            }
+
+            HStack(spacing: 10) {
+                Button {
+                    generateRoute()
+                } label: {
+                    Label("Generate", systemImage: "point.topleft.down.curvedto.point.bottomright.up")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(startPoint == nil || endPoint == nil)
+
+                Button {
+                    startPoint = nil
+                    endPoint = nil
+                    routeCoordinates = []
+                } label: {
+                    Label("Clear", systemImage: "trash")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .padding(14)
+        .background(.ultraThinMaterial)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(Color.white.opacity(0.08))
+                .frame(height: 1)
+        }
+    }
+
+    private func routePointRow(title: String, coordinate: CLLocationCoordinate2D?, symbol: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: symbol)
+                .foregroundStyle(coordinate == nil ? AppTheme.muted : AppTheme.accent)
+                .frame(width: 18)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.subheadline.bold())
+                if let coordinate {
+                    Text(String(format: "%.5f, %.5f", coordinate.latitude, coordinate.longitude))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(AppTheme.muted)
+                } else {
+                    Text("Not set")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.muted)
+                }
+            }
+
+            Spacer()
+        }
+        .padding(10)
+        .background(Color.white.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     private func legendRow(color: Color, label: String) -> some View {
@@ -225,16 +353,10 @@ struct ContentView: View {
 
     private var userInfoPill: some View {
         VStack {
-            if let loc = lastLocation {
-                Text(String(
-                    format: "Lat: %.4f, Lng: %.4f • Speed: %i µ",
-                    loc.coordinate.latitude,
-                    loc.coordinate.longitude,
-                    speedScore(
-                        d: UserStore.shared.downloadMbps ?? 0,
-                        u: UserStore.shared.uploadMbps ?? 0
-                    )
-                ))
+            if lastLocation != nil {
+                userInfoText
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             } else {
                 Text("Loading Stats...")
             }
@@ -245,6 +367,22 @@ struct ContentView: View {
         .padding(.vertical, 10)
         .background(.ultraThinMaterial, in: Capsule())
         .padding(.bottom, 20)
+    }
+
+    private var userInfoText: Text {
+        if NetworkStatusMonitor.shared.isUsingWiFi {
+            return Text("Speed: N/A \(Image(systemName: "wifi")) • \(currentAddress)")
+        }
+
+        return Text("\(speedSummary) • \(currentAddress)")
+    }
+
+    private var speedSummary: String {
+        let score = speedScore(
+            d: UserStore.shared.downloadMbps ?? 0,
+            u: UserStore.shared.uploadMbps ?? 0
+        )
+        return "Speed: \(score) µ"
     }
 
     private func generateRoute() {
@@ -300,6 +438,70 @@ struct ContentView: View {
                 circles = fetched.map { $0.toSignalCircle() }
             }
         }
+    }
+
+    private func updateAddressIfNeeded(for location: CLLocation) {
+        guard !isResolvingAddress else { return }
+
+        if let lastAddressLocation,
+           location.distance(from: lastAddressLocation) < 50 {
+            return
+        }
+
+        guard let request = MKReverseGeocodingRequest(location: location) else {
+            currentAddress = "Address unavailable"
+            return
+        }
+
+        isResolvingAddress = true
+
+        Task {
+            let mapItems = try? await request.mapItems
+
+            await MainActor.run {
+                isResolvingAddress = false
+
+                guard let mapItem = mapItems?.first else {
+                    currentAddress = "Address unavailable"
+                    return
+                }
+
+                currentAddress = formattedAddress(from: mapItem)
+                lastAddressLocation = location
+            }
+        }
+    }
+
+    private func formattedAddress(from mapItem: MKMapItem) -> String {
+        if let shortAddress = mapItem.address?.shortAddress, !shortAddress.isEmpty {
+            return streetOnlyAddress(from: shortAddress)
+        }
+
+        if let fullAddress = mapItem.address?.fullAddress, !fullAddress.isEmpty {
+            return streetOnlyAddress(from: fullAddress)
+        }
+
+        if let displayAddress = mapItem.addressRepresentations?.fullAddress(includingRegion: false, singleLine: true),
+           !displayAddress.isEmpty {
+            return streetOnlyAddress(from: displayAddress)
+        }
+
+        return mapItem.name ?? "Address unavailable"
+    }
+
+    private func streetOnlyAddress(from address: String) -> String {
+        let firstLine = address
+            .components(separatedBy: .newlines)
+            .first?
+            .components(separatedBy: ",")
+            .first?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard let firstLine, !firstLine.isEmpty else {
+            return "Address unavailable"
+        }
+
+        return firstLine
     }
 
     private var legendOverlay: some View {
@@ -374,9 +576,13 @@ struct ContentView: View {
         endPoint = nil
         routeCoordinates = []
         lastLocation = nil
+        currentAddress = "Finding address..."
+        lastAddressLocation = nil
+        isResolvingAddress = false
         hasCenteredOnFix = false
         showLegend = false
         showSettings = false
+        showRouteBuilderPage = false
     }
 
     private func restartSpeedTestTimer() {
@@ -597,5 +803,3 @@ private struct AuthView: View {
 #Preview {
     ContentView()
 }
-
-

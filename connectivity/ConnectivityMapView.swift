@@ -50,6 +50,30 @@ final class SpeedLabelAnnotation: NSObject, MKAnnotation {
     }
 }
 
+enum SignalDataDisplayMode: String, CaseIterable, Identifiable {
+    case onlyCircles
+    case onlyNumbers
+    case numbersAndCircles
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .onlyCircles: return "Only circles"
+        case .onlyNumbers: return "Only numbers"
+        case .numbersAndCircles: return "Numbers & circles"
+        }
+    }
+
+    var showsCircles: Bool {
+        self == .onlyCircles || self == .numbersAndCircles
+    }
+
+    var showsNumbers: Bool {
+        self == .onlyNumbers || self == .numbersAndCircles
+    }
+}
+
 // UIColor gradient version of colorForScore (UIKit context, not SwiftUI)
 func uiColorForScore(_ score: Int) -> UIColor {
     let t = max(0.0, min(1.0, Double(score) / 100.0))
@@ -76,6 +100,9 @@ struct ConnectivityMapView: UIViewRepresentable {
     @Binding var endPoint: CLLocationCoordinate2D?
     @Binding var circles: [SignalCircle]
     var routeCoordinates: [CLLocationCoordinate2D]
+    var dataDisplayMode: SignalDataDisplayMode = .numbersAndCircles
+    var showsRouteBuilderOverlays: Bool = true
+    var allowsRoutePointSelection: Bool = true
     @Binding var recenterMap: Bool
     
     func makeUIView(context: Context) -> MKMapView {
@@ -83,6 +110,7 @@ struct ConnectivityMapView: UIViewRepresentable {
         map.delegate = context.coordinator
         
         map.showsUserLocation = true
+        map.showsCompass = false
         map.userTrackingMode = .follow
         
         let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
@@ -107,27 +135,37 @@ struct ConnectivityMapView: UIViewRepresentable {
         map.removeOverlays(map.overlays)
 
         for circle in circles {
-            ConnectivityMapView.drawSignalCircle(
-                on: map,
-                at: circle.coordinate,
-                radius: circle.radius,
-                score: circle.score,
-            )
+            if dataDisplayMode.showsCircles {
+                ConnectivityMapView.drawSignalCircle(
+                    on: map,
+                    at: circle.coordinate,
+                    radius: circle.radius,
+                    score: circle.score
+                )
+            }
+
+            if dataDisplayMode.showsNumbers {
+                ConnectivityMapView.drawSignalNumber(
+                    on: map,
+                    at: circle.coordinate,
+                    score: circle.score
+                )
+            }
         }
 
-        if let start = startPoint {
+        if showsRouteBuilderOverlays, let start = startPoint {
             let ann = MKPointAnnotation()
             ann.coordinate = start
             ann.title = "Start"
             map.addAnnotation(ann)
         }
-        if let end = endPoint {
+        if showsRouteBuilderOverlays, let end = endPoint {
             let ann = MKPointAnnotation()
             ann.coordinate = end
             ann.title = "End"
             map.addAnnotation(ann)
         }
-        if routeCoordinates.count > 1 {
+        if showsRouteBuilderOverlays, routeCoordinates.count > 1 {
             let line = MKPolyline(coordinates: routeCoordinates, count: routeCoordinates.count)
             map.addOverlay(line)
         }
@@ -154,8 +192,14 @@ struct ConnectivityMapView: UIViewRepresentable {
         score: Int) -> SignalHeatOverlay {
         let circle = SignalHeatOverlay(center: location, radius: radius, score: score)
         map.addOverlay(circle)
-        map.addAnnotation(SpeedLabelAnnotation(coordinate: location, score: score))
         return circle
+    }
+
+    static func drawSignalNumber(
+        on map: MKMapView,
+        at location: CLLocationCoordinate2D,
+        score: Int) {
+        map.addAnnotation(SpeedLabelAnnotation(coordinate: location, score: score))
     }
 
     final class Coordinator: NSObject, MKMapViewDelegate {
@@ -175,6 +219,7 @@ struct ConnectivityMapView: UIViewRepresentable {
         }
 
         @objc func handleTap(_ gesture: UITapGestureRecognizer) {
+            guard parent.allowsRoutePointSelection else { return }
             guard let map = gesture.view as? MKMapView else { return }
             let point = gesture.location(in: map)
             let coordinate = map.convert(point, toCoordinateFrom: map)
