@@ -38,7 +38,12 @@ final class NetworkLogger {
         // Update UserStore with latest speeds before sending
         UserStore.shared.updateSpeed(downloadMbps: result.downloadMbps, uploadMbps: result.uploadMbps)
 
-        guard let body = try? JSONEncoder().encode(result) else {
+        let username = UserDefaults.standard.string(forKey: "userName") ?? ""
+
+        var dict = (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(result))) as? [String: Any] ?? [:]
+        dict["username"] = username
+
+        guard let body = try? JSONSerialization.data(withJSONObject: dict) else {
             completion?(NSError(domain: "NetworkLogger", code: -1))
             return
         }

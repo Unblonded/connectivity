@@ -371,10 +371,10 @@ struct ContentView: View {
 
     private var userInfoText: Text {
         if NetworkStatusMonitor.shared.isUsingWiFi {
-            return Text("Speed: N/A \(Image(systemName: "wifi")) • \(currentAddress)")
+            return Text("Speed: \(Image(systemName: "wifi")) • \(currentAddress)")
         }
 
-        return Text("\(speedSummary) • \(currentAddress)")
+        return Text("\(speedSummary) \(Image(systemName: "cellularbars")) • \(currentAddress)")
     }
 
     private var speedSummary: String {
@@ -382,7 +382,7 @@ struct ContentView: View {
             d: UserStore.shared.downloadMbps ?? 0,
             u: UserStore.shared.uploadMbps ?? 0
         )
-        return "Speed: \(score) µ"
+        return "Speed: \(score)"
     }
 
     private func generateRoute() {
@@ -652,6 +652,7 @@ struct ContentView: View {
 }
 
 private struct AuthView: View {
+    
     @State private var mode: AuthMode
     @State private var username = ""
     @State private var password = ""
