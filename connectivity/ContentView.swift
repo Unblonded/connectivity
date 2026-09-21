@@ -15,11 +15,50 @@ enum AuthMode: Equatable {
     case register
 }
 
+enum RouteStartMode: String, CaseIterable, Identifiable {
+    case currentLocation
+    case customAddress
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .currentLocation: return "Current Location"
+        case .customAddress: return "Address"
+        }
+    }
+}
+
+private enum RouteBuilderError: LocalizedError {
+    case currentLocationUnavailable
+    case emptyAddress(String)
+    case locationNotFound(String)
+    case noRoutesFound
+
+    var errorDescription: String? {
+        switch self {
+        case .currentLocationUnavailable:
+            return "Current location is not ready yet. Try again in a moment or enter a start address."
+        case .emptyAddress(let field):
+            return "Enter a \(field) address."
+        case .locationNotFound(let query):
+            return "Could not find \"\(query)\". Try a more specific address."
+        case .noRoutesFound:
+            return "No driving routes were found for those locations."
+        }
+    }
+}
+
 struct ContentView: View {
     @State private var circles: [SignalCircle] = []
     @State private var startPoint: CLLocationCoordinate2D?
     @State private var endPoint: CLLocationCoordinate2D?
     @State private var routeCoordinates: [CLLocationCoordinate2D] = []
+    @State private var routeStartMode: RouteStartMode = .currentLocation
+    @State private var routeStartAddress = ""
+    @State private var routeDestinationAddress = ""
+    @State private var routeErrorMessage: String?
+    @State private var isResolvingRoute = false
     @State private var lastLocation: CLLocation?
     @State private var currentAddress = "Finding address..."
     @State private var lastAddressLocation: CLLocation?
@@ -29,6 +68,7 @@ struct ContentView: View {
     @State private var showSettings = false
     @State private var showRouteBuilderPage = false
     @State private var showLeaderboardPage = false
+    @State private var showHeaderMenu = false
     @State private var recenterMap: Bool = false
     
     @AppStorage("isLoggedIn") private var isLoggedIn: Bool = false
@@ -117,6 +157,10 @@ struct ContentView: View {
                 Spacer()
             }
 
+            if showHeaderMenu {
+                headerMenuOverlay
+            }
+
             VStack {
                 Spacer()
                 userInfoPill
@@ -174,26 +218,12 @@ struct ContentView: View {
             Spacer(minLength: 8)
 
             HStack(spacing: 14) {
+                headerButton(systemName: "line.3.horizontal") {
+                    showHeaderMenu.toggle()
+                }
+
                 headerButton(systemName: "location.fill") {
                     recenterMap = true
-                }
-
-                headerButton(systemName: "arrow.clockwise") {
-                    loadCircles()
-                }
-
-                headerButton(systemName: "info.circle") {
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        showLegend = true
-                    }
-                }
-
-                headerButton(systemName: "trophy") {
-                    showLeaderboardPage = true
-                }
-
-                headerButton(systemName: "gearshape") {
-                    showSettings = true
                 }
 
                 Divider()
@@ -217,6 +247,63 @@ struct ContentView: View {
         }
     }
 
+    private var headerMenuOverlay: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            headerMenuItem(title: "Refresh", systemName: "arrow.clockwise") {
+                loadCircles()
+            }
+
+            headerMenuItem(title: "Info", systemName: "info.circle") {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    showLegend = true
+                }
+            }
+
+            headerMenuItem(title: "Leaderboard", systemName: "trophy") {
+                showLeaderboardPage = true
+            }
+
+            headerMenuItem(title: "Settings", systemName: "gearshape") {
+                showSettings = true
+            }
+        }
+        .padding(.vertical, 8)
+        .frame(width: 190)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.25), radius: 12, y: 8)
+        .padding(.top, 56)
+        .padding(.trailing, 70)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+        .zIndex(1)
+    }
+
+    private func headerMenuItem(title: String, systemName: String, action: @escaping () -> Void) -> some View {
+        Button {
+            showHeaderMenu = false
+            action()
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: systemName)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(AppTheme.accent)
+                    .frame(width: 22)
+
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+        }
+        .buttonStyle(.plain)
+    }
+
     private func headerButton(systemName: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
@@ -238,7 +325,7 @@ struct ContentView: View {
                 routeCoordinates: routeCoordinates,
                 dataDisplayMode: signalDataDisplayMode,
                 showsRouteBuilderOverlays: true,
-                allowsRoutePointSelection: true,
+                allowsRoutePointSelection: false,
                 recenterMap: $recenterMap
             )
             .ignoresSafeArea()
@@ -267,7 +354,7 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Route Builder")
                     .font(.headline)
-                Text("Tap the map to place start and end points.")
+                Text("Search an address, place, or route from your location.")
                     .font(.caption2)
                     .foregroundStyle(AppTheme.muted)
             }
@@ -290,31 +377,55 @@ struct ContentView: View {
     }
 
     private var routeBuilderControls: some View {
-        VStack(spacing: 14) {
-            HStack(spacing: 10) {
-                routePointRow(title: "Start", coordinate: startPoint, symbol: "1.circle.fill")
-                routePointRow(title: "End", coordinate: endPoint, symbol: "2.circle.fill")
+        VStack(spacing: 12) {
+            Picker("Start", selection: $routeStartMode) {
+                ForEach(RouteStartMode.allCases) { mode in
+                    Text(mode.label).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            if routeStartMode == .customAddress {
+                routeTextField(title: "Start", placeholder: "Start address or place", text: $routeStartAddress)
+            }
+
+            routeTextField(title: "Destination", placeholder: "Destination address or place", text: $routeDestinationAddress)
+
+            if let routeErrorMessage {
+                Text(routeErrorMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             HStack(spacing: 10) {
                 Button {
                     generateRoute()
                 } label: {
-                    Label("Generate", systemImage: "point.topleft.down.curvedto.point.bottomright.up")
-                        .frame(maxWidth: .infinity)
+                    if isResolvingRoute {
+                        ProgressView()
+                            .tint(.white)
+                            .frame(maxWidth: .infinity)
+                    } else {
+                        Label("Route", systemImage: "point.topleft.down.curvedto.point.bottomright.up")
+                            .frame(maxWidth: .infinity)
+                    }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(startPoint == nil || endPoint == nil)
+                .disabled(!canGenerateRoute)
 
                 Button {
-                    startPoint = nil
-                    endPoint = nil
-                    routeCoordinates = []
+                    clearRouteBuilder()
                 } label: {
                     Label("Clear", systemImage: "trash")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
+            }
+
+            HStack(spacing: 10) {
+                routePointRow(title: "Start", coordinate: startPoint, symbol: "1.circle.fill")
+                routePointRow(title: "End", coordinate: endPoint, symbol: "2.circle.fill")
             }
         }
         .padding(14)
@@ -323,6 +434,36 @@ struct ContentView: View {
             Rectangle()
                 .fill(Color.white.opacity(0.08))
                 .frame(height: 1)
+        }
+    }
+
+    private var canGenerateRoute: Bool {
+        guard !isResolvingRoute else { return false }
+        guard !routeDestinationAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+
+        if routeStartMode == .customAddress {
+            return !routeStartAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+
+        return true
+    }
+
+    private func routeTextField(title: String, placeholder: String, text: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AppTheme.muted)
+
+            TextField(placeholder, text: text)
+                .textInputAutocapitalization(.words)
+                .autocorrectionDisabled(false)
+                .submitLabel(.route)
+                .onSubmit(generateRoute)
+                .foregroundStyle(.white)
+                .tint(AppTheme.accent)
+                .padding(12)
+                .background(Color.white.opacity(0.06))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
         }
     }
 
@@ -395,38 +536,135 @@ struct ContentView: View {
     }
 
     private func generateRoute() {
-        guard let start = startPoint, let end = endPoint else { return }
-        
+        guard canGenerateRoute else { return }
+
+        let destinationQuery = routeDestinationAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        let startQuery = routeStartAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        let searchCenter = UserStore.shared.coordinate
+
+        isResolvingRoute = true
+        routeErrorMessage = nil
+        routeCoordinates = []
+
+        switch routeStartMode {
+        case .currentLocation:
+            guard UserStore.shared.hasFix else {
+                finishRouteGeneration(with: RouteBuilderError.currentLocationUnavailable)
+                return
+            }
+            resolveDestinationAndCalculateRoute(destinationQuery: destinationQuery, start: searchCenter)
+        case .customAddress:
+            resolveRouteCoordinate(for: startQuery, near: searchCenter, emptyFieldName: "start") { result in
+                switch result {
+                case .success(let start):
+                    resolveDestinationAndCalculateRoute(destinationQuery: destinationQuery, start: start)
+                case .failure(let error):
+                    finishRouteGeneration(with: error)
+                }
+            }
+        }
+    }
+
+    private func resolveDestinationAndCalculateRoute(destinationQuery: String, start: CLLocationCoordinate2D) {
+        resolveRouteCoordinate(for: destinationQuery, near: start, emptyFieldName: "destination") { result in
+            switch result {
+            case .success(let end):
+                DispatchQueue.main.async {
+                    startPoint = start
+                    endPoint = end
+                }
+                calculateRoute(from: start, to: end)
+            case .failure(let error):
+                finishRouteGeneration(with: error)
+            }
+        }
+    }
+
+    private func resolveRouteCoordinate(
+        for query: String,
+        near coordinate: CLLocationCoordinate2D,
+        emptyFieldName: String,
+        completion: @escaping (Result<CLLocationCoordinate2D, Error>) -> Void
+    ) {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else {
+            completion(.failure(RouteBuilderError.emptyAddress(emptyFieldName)))
+            return
+        }
+
+        let region = MKCoordinateRegion(
+            center: coordinate,
+            span: MKCoordinateSpan(latitudeDelta: 0.5, longitudeDelta: 0.5)
+        )
+        let request = MKLocalSearch.Request(naturalLanguageQuery: trimmedQuery, region: region)
+        request.resultTypes = [.address, .pointOfInterest]
+
+        MKLocalSearch(request: request).start { response, error in
+            if let error {
+                completion(.failure(error))
+                return
+            }
+
+            guard let mapItem = response?.mapItems.first else {
+                completion(.failure(RouteBuilderError.locationNotFound(trimmedQuery)))
+                return
+            }
+
+            completion(.success(mapItem.location.coordinate))
+        }
+    }
+
+    private func calculateRoute(from start: CLLocationCoordinate2D, to end: CLLocationCoordinate2D) {
         let request = MKDirections.Request()
         request.source = MKMapItem(location: CLLocation(latitude: start.latitude, longitude: start.longitude), address: nil)
         request.destination = MKMapItem(location: CLLocation(latitude: end.latitude, longitude: end.longitude), address: nil)
         request.transportType = .automobile
-        request.requestsAlternateRoutes = true // get up to 3 routes to compare
-        
+        request.requestsAlternateRoutes = true
+
         MKDirections(request: request).calculate { response, error in
             guard let routes = response?.routes, !routes.isEmpty else {
                 print("Route error: \(error?.localizedDescription ?? "unknown")")
+                finishRouteGeneration(with: RouteBuilderError.noRoutesFound)
                 return
             }
-            
-            // Print all route scores so you can verify
-            routes.enumerated().forEach { i, route in
-                let score = self.scoreRoute(route)
-                print("Route \(i): \(route.name) — signal score: \(String(format: "%.1f", score)) — ETA: \(Int(route.expectedTravelTime / 60))min")
+
+            routes.enumerated().forEach { index, route in
+                let score = scoreRoute(route)
+                print("Route \(index): \(route.name) — signal score: \(String(format: "%.1f", score)) — ETA: \(Int(route.expectedTravelTime / 60))min")
             }
-            
-            let best = routes.max(by: { scoreRoute($0) < scoreRoute($1) })
-            
+
+            guard let best = routes.max(by: { scoreRoute($0) < scoreRoute($1) }) else {
+                finishRouteGeneration(with: RouteBuilderError.noRoutesFound)
+                return
+            }
+
+            print("Chose: \(best.name) as best signal route")
+            let pointCount = best.polyline.pointCount
+            var coords = [CLLocationCoordinate2D](repeating: .init(), count: pointCount)
+            best.polyline.getCoordinates(&coords, range: NSRange(location: 0, length: pointCount))
+
             DispatchQueue.main.async {
-                if let best = best {
-                    print("Chose: \(best.name) as best signal route")
-                    let pointCount = best.polyline.pointCount
-                    var coords = [CLLocationCoordinate2D](repeating: .init(), count: pointCount)
-                    best.polyline.getCoordinates(&coords, range: NSRange(location: 0, length: pointCount))
-                    routeCoordinates = coords
-                }
+                routeCoordinates = coords
+                isResolvingRoute = false
             }
         }
+    }
+
+    private func finishRouteGeneration(with error: Error) {
+        DispatchQueue.main.async {
+            routeErrorMessage = error.localizedDescription
+            isResolvingRoute = false
+        }
+    }
+
+    private func clearRouteBuilder() {
+        startPoint = nil
+        endPoint = nil
+        routeCoordinates = []
+        routeStartAddress = ""
+        routeDestinationAddress = ""
+        routeErrorMessage = nil
+        isResolvingRoute = false
     }
 
     private func loadCircles() {
@@ -584,6 +822,11 @@ struct ContentView: View {
         startPoint = nil
         endPoint = nil
         routeCoordinates = []
+        routeStartMode = .currentLocation
+        routeStartAddress = ""
+        routeDestinationAddress = ""
+        routeErrorMessage = nil
+        isResolvingRoute = false
         lastLocation = nil
         currentAddress = "Finding address..."
         lastAddressLocation = nil
@@ -593,6 +836,7 @@ struct ContentView: View {
         showSettings = false
         showRouteBuilderPage = false
         showLeaderboardPage = false
+        showHeaderMenu = false
     }
 
     private func restartSpeedTestTimer() {

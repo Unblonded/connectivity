@@ -59,9 +59,9 @@ enum SignalDataDisplayMode: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .onlyCircles: return "Only circles"
-        case .onlyNumbers: return "Only numbers"
-        case .numbersAndCircles: return "Numbers & circles"
+        case .onlyCircles: return "Circles"
+        case .onlyNumbers: return "Numbers"
+        case .numbersAndCircles: return "Both"
         }
     }
 
