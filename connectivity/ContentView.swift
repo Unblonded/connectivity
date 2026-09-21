@@ -28,6 +28,7 @@ struct ContentView: View {
     @State private var showLegend = false
     @State private var showSettings = false
     @State private var showRouteBuilderPage = false
+    @State private var showLeaderboardPage = false
     @State private var recenterMap: Bool = false
     
     @AppStorage("isLoggedIn") private var isLoggedIn: Bool = false
@@ -133,6 +134,10 @@ struct ContentView: View {
             routeBuilderPage
                 .preferredColorScheme(.dark)
         }
+        .fullScreenCover(isPresented: $showLeaderboardPage) {
+            LeaderboardView()
+                .preferredColorScheme(.dark)
+        }
         .foregroundStyle(.white)
     }
 
@@ -181,6 +186,10 @@ struct ContentView: View {
                     withAnimation(.easeOut(duration: 0.2)) {
                         showLegend = true
                     }
+                }
+
+                headerButton(systemName: "trophy") {
+                    showLeaderboardPage = true
                 }
 
                 headerButton(systemName: "gearshape") {
@@ -583,6 +592,7 @@ struct ContentView: View {
         showLegend = false
         showSettings = false
         showRouteBuilderPage = false
+        showLeaderboardPage = false
     }
 
     private func restartSpeedTestTimer() {
