@@ -49,6 +49,18 @@ private enum RouteBuilderError: LocalizedError {
     }
 }
 
+private struct SignalRouteOption {
+    let name: String
+    let coordinates: [CLLocationCoordinate2D]
+    let signalScore: Double
+    let travelTime: TimeInterval
+    let usesDataWaypoint: Bool
+
+    var selectionScore: Double {
+        signalScore - (travelTime / 300.0)
+    }
+}
+
 struct ContentView: View {
     @State private var circles: [SignalCircle] = []
     @State private var startPoint: CLLocationCoordinate2D?
@@ -423,10 +435,6 @@ struct ContentView: View {
                 .buttonStyle(.bordered)
             }
 
-            HStack(spacing: 10) {
-                routePointRow(title: "Start", coordinate: startPoint, symbol: "1.circle.fill")
-                routePointRow(title: "End", coordinate: endPoint, symbol: "2.circle.fill")
-            }
         }
         .padding(14)
         .background(.ultraThinMaterial)
@@ -467,32 +475,6 @@ struct ContentView: View {
         }
     }
 
-    private func routePointRow(title: String, coordinate: CLLocationCoordinate2D?, symbol: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: symbol)
-                .foregroundStyle(coordinate == nil ? AppTheme.muted : AppTheme.accent)
-                .frame(width: 18)
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.subheadline.bold())
-                if let coordinate {
-                    Text(String(format: "%.5f, %.5f", coordinate.latitude, coordinate.longitude))
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(AppTheme.muted)
-                } else {
-                    Text("Not set")
-                        .font(.caption)
-                        .foregroundStyle(AppTheme.muted)
-                }
-            }
-
-            Spacer()
-        }
-        .padding(10)
-        .background(Color.white.opacity(0.06))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-    }
 
     private func legendRow(color: Color, label: String) -> some View {
         HStack {
@@ -615,38 +597,125 @@ struct ContentView: View {
     }
 
     private func calculateRoute(from start: CLLocationCoordinate2D, to end: CLLocationCoordinate2D) {
+        let waypoints = signalWaypointCandidates(from: start, to: end)
+        let group = DispatchGroup()
+        let lock = NSLock()
+        var options: [SignalRouteOption] = []
+
+        func appendOptions(_ newOptions: [SignalRouteOption]) {
+            lock.lock()
+            options.append(contentsOf: newOptions)
+            lock.unlock()
+        }
+
+        group.enter()
+        calculateRouteOptions(from: start, to: end, via: nil) { routeOptions in
+            appendOptions(routeOptions)
+            group.leave()
+        }
+
+        for waypoint in waypoints {
+            group.enter()
+            calculateRouteOptions(from: start, to: end, via: waypoint.coordinate) { routeOptions in
+                appendOptions(routeOptions)
+                group.leave()
+            }
+        }
+
+        group.notify(queue: .main) {
+            guard let best = options.max(by: { $0.selectionScore < $1.selectionScore }) else {
+                finishRouteGeneration(with: RouteBuilderError.noRoutesFound)
+                return
+            }
+
+            print("Chose: \(best.name) — signal score: \(String(format: "%.1f", best.signalScore)) — ETA: \(Int(best.travelTime / 60))min — data waypoint: \(best.usesDataWaypoint)")
+            routeCoordinates = best.coordinates
+            isResolvingRoute = false
+        }
+    }
+
+    private func calculateRouteOptions(
+        from start: CLLocationCoordinate2D,
+        to end: CLLocationCoordinate2D,
+        via waypoint: CLLocationCoordinate2D?,
+        completion: @escaping ([SignalRouteOption]) -> Void
+    ) {
+        if let waypoint {
+            calculateRouteLeg(from: start, to: waypoint, requestsAlternateRoutes: false) { firstLegs in
+                guard let firstLeg = firstLegs.min(by: { $0.expectedTravelTime < $1.expectedTravelTime }) else {
+                    completion([])
+                    return
+                }
+
+                calculateRouteLeg(from: waypoint, to: end, requestsAlternateRoutes: false) { secondLegs in
+                    guard let secondLeg = secondLegs.min(by: { $0.expectedTravelTime < $1.expectedTravelTime }) else {
+                        completion([])
+                        return
+                    }
+
+                    let coordinates = combinedCoordinates(for: [firstLeg, secondLeg])
+                    let travelTime = firstLeg.expectedTravelTime + secondLeg.expectedTravelTime
+                    let signalScore = scoreRouteCoordinates(coordinates)
+                    completion([
+                        SignalRouteOption(
+                            name: "Via signal data",
+                            coordinates: coordinates,
+                            signalScore: signalScore,
+                            travelTime: travelTime,
+                            usesDataWaypoint: true
+                        )
+                    ])
+                }
+            }
+            return
+        }
+
+        calculateRouteLeg(from: start, to: end, requestsAlternateRoutes: true) { routes in
+            let routeOptions = routes.map { route in
+                let coordinates = coordinates(for: route)
+                return SignalRouteOption(
+                    name: route.name.isEmpty ? "Direct route" : route.name,
+                    coordinates: coordinates,
+                    signalScore: scoreRouteCoordinates(coordinates),
+                    travelTime: route.expectedTravelTime,
+                    usesDataWaypoint: false
+                )
+            }
+            completion(routeOptions)
+        }
+    }
+
+    private func calculateRouteLeg(
+        from start: CLLocationCoordinate2D,
+        to end: CLLocationCoordinate2D,
+        requestsAlternateRoutes: Bool,
+        completion: @escaping ([MKRoute]) -> Void
+    ) {
         let request = MKDirections.Request()
         request.source = MKMapItem(location: CLLocation(latitude: start.latitude, longitude: start.longitude), address: nil)
         request.destination = MKMapItem(location: CLLocation(latitude: end.latitude, longitude: end.longitude), address: nil)
         request.transportType = .automobile
-        request.requestsAlternateRoutes = true
+        request.requestsAlternateRoutes = requestsAlternateRoutes
 
         MKDirections(request: request).calculate { response, error in
-            guard let routes = response?.routes, !routes.isEmpty else {
-                print("Route error: \(error?.localizedDescription ?? "unknown")")
-                finishRouteGeneration(with: RouteBuilderError.noRoutesFound)
-                return
+            if let error {
+                print("Route leg error: \(error.localizedDescription)")
             }
+            completion(response?.routes ?? [])
+        }
+    }
 
-            routes.enumerated().forEach { index, route in
-                let score = scoreRoute(route)
-                print("Route \(index): \(route.name) — signal score: \(String(format: "%.1f", score)) — ETA: \(Int(route.expectedTravelTime / 60))min")
-            }
+    private func coordinates(for route: MKRoute) -> [CLLocationCoordinate2D] {
+        let pointCount = route.polyline.pointCount
+        var coords = [CLLocationCoordinate2D](repeating: .init(), count: pointCount)
+        route.polyline.getCoordinates(&coords, range: NSRange(location: 0, length: pointCount))
+        return coords
+    }
 
-            guard let best = routes.max(by: { scoreRoute($0) < scoreRoute($1) }) else {
-                finishRouteGeneration(with: RouteBuilderError.noRoutesFound)
-                return
-            }
-
-            print("Chose: \(best.name) as best signal route")
-            let pointCount = best.polyline.pointCount
-            var coords = [CLLocationCoordinate2D](repeating: .init(), count: pointCount)
-            best.polyline.getCoordinates(&coords, range: NSRange(location: 0, length: pointCount))
-
-            DispatchQueue.main.async {
-                routeCoordinates = coords
-                isResolvingRoute = false
-            }
+    private func combinedCoordinates(for routes: [MKRoute]) -> [CLLocationCoordinate2D] {
+        routes.enumerated().flatMap { index, route in
+            let coords = coordinates(for: route)
+            return index == 0 ? coords : Array(coords.dropFirst())
         }
     }
 
@@ -864,44 +933,101 @@ struct ContentView: View {
         }
     }
     
-    private func scoreRoute(_ route: MKRoute) -> Double {
-        guard !circles.isEmpty else { return 0 }
-        
-        let pointCount = route.polyline.pointCount
-        var coords = [CLLocationCoordinate2D](repeating: .init(), count: pointCount)
-        route.polyline.getCoordinates(&coords, range: NSRange(location: 0, length: pointCount))
-        
-        // Sample every 5th point so we're not checking thousands
-        let sampled = stride(from: 0, to: coords.count, by: 5).map { coords[$0] }
-        
-        var totalScore = 0.0
-        var matched = 0
-        
-        for point in sampled {
-            let pointLocation = CLLocation(latitude: point.latitude, longitude: point.longitude)
-            
-            // Find the closest circle to this point
-            if let closest = circles.min(by: { a, b in
-                let aLoc = CLLocation(latitude: a.coordinate.latitude, longitude: a.coordinate.longitude)
-                let bLoc = CLLocation(latitude: b.coordinate.latitude, longitude: b.coordinate.longitude)
-                return aLoc.distance(from: pointLocation) < bLoc.distance(from: pointLocation)
-            })
-            {
-                let distance = CLLocation(
-                    latitude: closest.coordinate.latitude,
-                    longitude: closest.coordinate.longitude
-                ).distance(from: pointLocation)
-                
-                // Only count it if the point is actually inside the circle
-                if distance <= closest.radius {
-                    totalScore += Double(closest.score)
-                    matched += 1
-                }
+    private func signalWaypointCandidates(from start: CLLocationCoordinate2D, to end: CLLocationCoordinate2D) -> [SignalCircle] {
+        guard !circles.isEmpty else { return [] }
+
+        let startPoint = MKMapPoint(start)
+        let endPoint = MKMapPoint(end)
+        let directDistance = max(startPoint.distance(to: endPoint), 1)
+        let corridorWidth = min(max(directDistance * 0.25, 750), 5_000)
+        let maxAddedDistance = max(directDistance * 0.75, 2_000)
+
+        let rankedCandidates = circles
+            .filter { $0.score >= 55 }
+            .compactMap { circle -> (circle: SignalCircle, rank: Double)? in
+                let point = MKMapPoint(circle.coordinate)
+                let progress = routeProgress(for: point, from: startPoint, to: endPoint)
+                guard (0.08...0.92).contains(progress) else { return nil }
+
+                let distanceFromRoute = distanceFromSegment(point, start: startPoint, end: endPoint)
+                guard distanceFromRoute <= corridorWidth else { return nil }
+
+                let addedDistance = startPoint.distance(to: point) + point.distance(to: endPoint) - directDistance
+                guard addedDistance <= maxAddedDistance else { return nil }
+
+                let rank = Double(circle.score) * 4.0 - (distanceFromRoute / 120.0) - (addedDistance / 250.0)
+                return (circle, rank)
+            }
+            .sorted { $0.rank > $1.rank }
+
+        var selected: [SignalCircle] = []
+        for candidate in rankedCandidates {
+            let candidatePoint = MKMapPoint(candidate.circle.coordinate)
+            let isTooClose = selected.contains { existing in
+                MKMapPoint(existing.coordinate).distance(to: candidatePoint) < 600
+            }
+
+            if !isTooClose {
+                selected.append(candidate.circle)
+            }
+
+            if selected.count == 6 {
+                break
             }
         }
-        
-        // If no circles matched, return neutral score
-        return matched > 0 ? totalScore / Double(matched) : 50.0
+
+        return selected
+    }
+
+    private func routeProgress(for point: MKMapPoint, from start: MKMapPoint, to end: MKMapPoint) -> Double {
+        let dx = end.x - start.x
+        let dy = end.y - start.y
+        let lengthSquared = dx * dx + dy * dy
+        guard lengthSquared > 0 else { return 0 }
+
+        let progress = ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared
+        return min(max(progress, 0), 1)
+    }
+
+    private func distanceFromSegment(_ point: MKMapPoint, start: MKMapPoint, end: MKMapPoint) -> CLLocationDistance {
+        let progress = routeProgress(for: point, from: start, to: end)
+        let projected = MKMapPoint(
+            x: start.x + (end.x - start.x) * progress,
+            y: start.y + (end.y - start.y) * progress
+        )
+        return point.distance(to: projected)
+    }
+
+    private func scoreRoute(_ route: MKRoute) -> Double {
+        scoreRouteCoordinates(coordinates(for: route))
+    }
+
+    private func scoreRouteCoordinates(_ coordinates: [CLLocationCoordinate2D]) -> Double {
+        guard !circles.isEmpty else { return 50 }
+        guard !coordinates.isEmpty else { return 50 }
+
+        let sampled = stride(from: 0, to: coordinates.count, by: 5).map { coordinates[$0] }
+        guard !sampled.isEmpty else { return 50 }
+
+        let totalScore = sampled.reduce(0.0) { total, coordinate in
+            let pointLocation = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+            guard let closest = circles.min(by: { a, b in
+                let aLocation = CLLocation(latitude: a.coordinate.latitude, longitude: a.coordinate.longitude)
+                let bLocation = CLLocation(latitude: b.coordinate.latitude, longitude: b.coordinate.longitude)
+                return aLocation.distance(from: pointLocation) < bLocation.distance(from: pointLocation)
+            }) else {
+                return total + 50.0
+            }
+
+            let closestLocation = CLLocation(
+                latitude: closest.coordinate.latitude,
+                longitude: closest.coordinate.longitude
+            )
+            let distance = closestLocation.distance(from: pointLocation)
+            return total + (distance <= closest.radius ? Double(closest.score) : 50.0)
+        }
+
+        return totalScore / Double(sampled.count)
     }
 }
 
