@@ -427,6 +427,15 @@ struct ContentView: View {
                 .disabled(!canGenerateRoute)
 
                 Button {
+                    startGuidance()
+                } label: {
+                    Label("Guide", systemImage: "location.north.line")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!canStartGuidance)
+
+                Button {
                     clearRouteBuilder()
                 } label: {
                     Label("Clear", systemImage: "trash")
@@ -454,6 +463,10 @@ struct ContentView: View {
         }
 
         return true
+    }
+
+    private var canStartGuidance: Bool {
+        startPoint != nil && endPoint != nil && routeCoordinates.count > 1 && !isResolvingRoute
     }
 
     private func routeTextField(title: String, placeholder: String, text: Binding<String>) -> some View {
@@ -734,6 +747,29 @@ struct ContentView: View {
         routeDestinationAddress = ""
         routeErrorMessage = nil
         isResolvingRoute = false
+    }
+
+    private func startGuidance() {
+        guard let startPoint, let endPoint else { return }
+
+        let destination = MKMapItem(location: CLLocation(latitude: endPoint.latitude, longitude: endPoint.longitude), address: nil)
+        destination.name = routeDestinationAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "Destination"
+            : routeDestinationAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let source: MKMapItem
+        if routeStartMode == .currentLocation {
+            source = MKMapItem.forCurrentLocation()
+        } else {
+            source = MKMapItem(location: CLLocation(latitude: startPoint.latitude, longitude: startPoint.longitude), address: nil)
+            let startName = routeStartAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+            source.name = startName.isEmpty ? "Start" : startName
+        }
+
+        MKMapItem.openMaps(
+            with: [source, destination],
+            launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving]
+        )
     }
 
     private func loadCircles() {
