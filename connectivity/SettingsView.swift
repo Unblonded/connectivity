@@ -105,6 +105,9 @@ struct SettingsView: View {
     @AppStorage("keepScreenAwake") private var keepScreenAwake: Bool = false
     @AppStorage("signalDataDisplayMode") private var signalDataDisplayModeRaw: String = SignalDataDisplayMode.numbersAndCircles.rawValue
 
+    @State private var cacheSnapshot = SignalCircleCache.snapshot()
+    @State private var showClearCacheConfirmation = false
+
     private var mapRefreshInterval: Binding<MapRefreshInterval> {
         Binding(
             get: { MapRefreshInterval(rawValue: mapRefreshIntervalRaw) ?? .min1 },
@@ -194,6 +197,27 @@ struct SettingsView: View {
                         }
                     }
                 }
+
+                Section("Map data cache") {
+                    HStack {
+                        Text("Cached points")
+                        Spacer()
+                        Text("\(cacheSnapshot.entryCount)")
+                            .foregroundStyle(AppTheme.muted)
+                    }
+
+                    HStack {
+                        Text("Data size")
+                        Spacer()
+                        Text(cacheSnapshot.formattedByteCount)
+                            .foregroundStyle(AppTheme.muted)
+                    }
+
+                    Button("Clear cached map data", role: .destructive) {
+                        showClearCacheConfirmation = true
+                    }
+                    .disabled(cacheSnapshot.entryCount == 0)
+                }
                 
                 Section("Display Idle Timeout") {
                     Toggle("Keep screen awake", isOn: $keepScreenAwake)
@@ -213,6 +237,23 @@ struct SettingsView: View {
                     Button("Done") { dismiss() }
                 }
             }
+            .onAppear(perform: refreshCacheSnapshot)
+            .onReceive(NotificationCenter.default.publisher(for: .signalCircleCacheDidChange)) { _ in
+                refreshCacheSnapshot()
+            }
+            .alert("Clear cached map data?", isPresented: $showClearCacheConfirmation) {
+                Button("Clear", role: .destructive) {
+                    SignalCircleCache.clear()
+                    refreshCacheSnapshot()
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("This removes locally saved map data. The next refresh will download points from the server again.")
+            }
         }
+    }
+
+    private func refreshCacheSnapshot() {
+        cacheSnapshot = SignalCircleCache.snapshot()
     }
 }

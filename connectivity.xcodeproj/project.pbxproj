@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		62020EA93062EBCB00870701 /* SignalCircleCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62020EA83062EBCB00870701 /* SignalCircleCache.swift */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		62AA67E43051E3770083B8C2 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -24,6 +28,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		62020EA83062EBCB00870701 /* SignalCircleCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalCircleCache.swift; sourceTree = "<group>"; };
 		62AA67D43051E3760083B8C2 /* connectivity.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = connectivity.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		62AA67E33051E3770083B8C2 /* connectivityTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = connectivityTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		62AA67ED3051E3770083B8C2 /* connectivityUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = connectivityUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -92,6 +97,7 @@
 				62AA67E63051E3770083B8C2 /* connectivityTests */,
 				62AA67F03051E3770083B8C2 /* connectivityUITests */,
 				62AA67D53051E3760083B8C2 /* Products */,
+				62020EA83062EBCB00870701 /* SignalCircleCache.swift */,
 			);
 			sourceTree = "<group>";
 		};
@@ -249,6 +255,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				62020EA93062EBCB00870701 /* SignalCircleCache.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

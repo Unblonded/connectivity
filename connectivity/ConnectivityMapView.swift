@@ -14,19 +14,19 @@ struct SignalCircle: Identifiable {
     let score: Int   // 0...100, from speedScore
 }
 
-struct SignalCircleJSON: Decodable {
+struct SignalCircleJSON: Codable {
     let id: Int
     let loc: Location
     let radius: Double
     let speed: Speed
     let sampleCount: Int
 
-    struct Location: Decodable {
+    struct Location: Codable {
         let lat: Double
         let lon: Double
     }
 
-    struct Speed: Decodable {
+    struct Speed: Codable {
         let uploadMbps: Double
         let downloadMbps: Double
     }

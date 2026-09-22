@@ -130,6 +130,9 @@ struct ContentView: View {
             lastLocation = updatedLocation
             updateAddressIfNeeded(for: updatedLocation)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .signalCircleCacheDidChange)) { _ in
+            circles = SignalCircleCache.loadEntries().map { $0.toSignalCircle() }
+        }
         .onAppear {
             guard isLoggedIn else { return }
             startAuthenticatedServices()
@@ -775,8 +778,14 @@ struct ContentView: View {
     private func loadCircles() {
         guard isLoggedIn else { return }
 
-        // Replace with your actual endpoint
-        guard let url = URL(string: "https://api.kalculator.lol/calculated?since=0") else { return }
+        let cachedEntries = SignalCircleCache.loadEntries()
+        let since = SignalCircleCache.highestID(in: cachedEntries)
+
+        if !cachedEntries.isEmpty {
+            circles = cachedEntries.map { $0.toSignalCircle() }
+        }
+
+        guard let url = URL(string: "https://api.kalculator.lol/calculated?since=\(since)") else { return }
 
         NetworkClient.shared.get(url: url, as: [SignalCircleJSON].self) { fetched, error in
             DispatchQueue.main.async {
@@ -784,10 +793,12 @@ struct ContentView: View {
                     print("Failed to load circles: \(error)")
                     return
                 }
-                guard let fetched = fetched else {
+                guard let fetched else {
                     return
                 }
-                circles = fetched.map { $0.toSignalCircle() }
+
+                let mergedEntries = SignalCircleCache.store(newEntries: fetched)
+                circles = mergedEntries.map { $0.toSignalCircle() }
             }
         }
     }
