@@ -934,6 +934,7 @@ struct ContentView: View {
     private func logout() {
         isLoggedIn = false
         userName = ""
+        UserDefaults.standard.removeObject(forKey: "userPassword")
         circles = []
         startPoint = nil
         endPoint = nil
@@ -1203,6 +1204,7 @@ private struct AuthView: View {
 
         isSubmitting = true
         errorMessage = nil
+        let submittedPassword = password
 
         let completion: (Error?) -> Void = { error in
             DispatchQueue.main.async {
@@ -1215,6 +1217,7 @@ private struct AuthView: View {
                     return
                 }
 
+                UserDefaults.standard.set(submittedPassword, forKey: "userPassword")
                 password = ""
                 onAuthenticated(trimmedUsername, mode)
             }

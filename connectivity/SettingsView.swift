@@ -104,9 +104,17 @@ struct SettingsView: View {
     @AppStorage("mapRefreshIntervalSeconds") private var mapRefreshIntervalRaw: Int = MapRefreshInterval.min1.rawValue
     @AppStorage("keepScreenAwake") private var keepScreenAwake: Bool = false
     @AppStorage("signalDataDisplayMode") private var signalDataDisplayModeRaw: String = SignalDataDisplayMode.numbersAndCircles.rawValue
+    @AppStorage("userName") private var userName: String = ""
+    @AppStorage("userPassword") private var userPassword: String = ""
 
     @State private var cacheSnapshot = SignalCircleCache.snapshot()
     @State private var showClearCacheConfirmation = false
+    @State private var showResetPasswordPrompt = false
+    @State private var showResetPasswordResult = false
+    @State private var newPassword = ""
+    @State private var resetPasswordResultTitle = ""
+    @State private var resetPasswordResultMessage = ""
+    @State private var isResettingPassword = false
 
     private var mapRefreshInterval: Binding<MapRefreshInterval> {
         Binding(
@@ -218,6 +226,20 @@ struct SettingsView: View {
                     }
                     .disabled(cacheSnapshot.entryCount == 0)
                 }
+
+                Section("Account Management") {
+                    Button {
+                        newPassword = ""
+                        showResetPasswordPrompt = true
+                    } label: {
+                        if isResettingPassword {
+                            ProgressView()
+                        } else {
+                            Text("Reset Password")
+                        }
+                    }
+                    .disabled(isResettingPassword || userName.isEmpty)
+                }
                 
                 Section("Display Idle Timeout") {
                     Toggle("Keep screen awake", isOn: $keepScreenAwake)
@@ -250,10 +272,71 @@ struct SettingsView: View {
             } message: {
                 Text("This removes locally saved map data. The next refresh will download points from the server again.")
             }
+            .alert("Reset Password", isPresented: $showResetPasswordPrompt) {
+                SecureField("New password", text: $newPassword)
+                Button("Update") {
+                    resetPassword()
+                }
+                Button("Cancel", role: .cancel) {
+                    newPassword = ""
+                }
+            } message: {
+                Text("Enter the new password for your account.")
+            }
+            .alert(resetPasswordResultTitle, isPresented: $showResetPasswordResult) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(resetPasswordResultMessage)
+            }
         }
     }
 
     private func refreshCacheSnapshot() {
         cacheSnapshot = SignalCircleCache.snapshot()
+    }
+
+    private func resetPassword() {
+        let trimmedUsername = userName.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !newPassword.isEmpty else {
+            showResetPasswordResult(title: "Password not changed", message: "Enter a new password first.")
+            return
+        }
+
+        guard !trimmedUsername.isEmpty, !userPassword.isEmpty else {
+            showResetPasswordResult(
+                title: "Password not changed",
+                message: "Your current password is not stored yet. Log out and log back in, then try again."
+            )
+            return
+        }
+
+        let requestedPassword = newPassword
+        isResettingPassword = true
+
+        NetworkLogger.shared.resetPassword(
+            username: trimmedUsername,
+            currentPassword: userPassword,
+            newPassword: requestedPassword
+        ) { error in
+            DispatchQueue.main.async {
+                isResettingPassword = false
+
+                if let error {
+                    showResetPasswordResult(title: "Password not changed", message: error.localizedDescription)
+                    return
+                }
+
+                userPassword = requestedPassword
+                newPassword = ""
+                showResetPasswordResult(title: "Password updated", message: "Your saved password was updated for future account actions.")
+            }
+        }
+    }
+
+    private func showResetPasswordResult(title: String, message: String) {
+        resetPasswordResultTitle = title
+        resetPasswordResultMessage = message
+        showResetPasswordResult = true
     }
 }

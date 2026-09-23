@@ -19,12 +19,33 @@ struct AuthRequest: Codable {
     let password: String
 }
 
+struct ResetPasswordRequest: Codable {
+    let username: String
+    let currentPassword: String
+    let newPassword: String
+}
+
+private enum NetworkLoggerError: LocalizedError {
+    case encodingFailed
+    case requestFailed(statusCode: Int, message: String?)
+
+    var errorDescription: String? {
+        switch self {
+        case .encodingFailed:
+            return "Could not prepare the request."
+        case .requestFailed(_, let message):
+            return message ?? "The server rejected the request."
+        }
+    }
+}
+
 final class NetworkLogger {
     static let shared = NetworkLogger()
 
     private let sampleEndpoint = URL(string: "https://api.kalculator.lol/samples")!
     private let registerEndpoint = URL(string: "https://api.kalculator.lol/register")!
     private let loginEndpoint = URL(string: "https://api.kalculator.lol/login")!
+    private let resetPasswordEndpoint = URL(string: "https://api.kalculator.lol/reset-password")!
     
     func register(username: String, password: String, completion: @escaping (Error?) -> Void) {
         sendAuthRequest(to: registerEndpoint, username: username, password: password, completion: completion)
@@ -32,6 +53,21 @@ final class NetworkLogger {
 
     func login(username: String, password: String, completion: @escaping (Error?) -> Void) {
         sendAuthRequest(to: loginEndpoint, username: username, password: password, completion: completion)
+    }
+
+    func resetPassword(
+        username: String,
+        currentPassword: String,
+        newPassword: String,
+        completion: @escaping (Error?) -> Void
+    ) {
+        let resetRequest = ResetPasswordRequest(
+            username: username,
+            currentPassword: currentPassword,
+            newPassword: newPassword
+        )
+
+        sendJSONRequest(to: resetPasswordEndpoint, body: resetRequest, completion: completion)
     }
 
     func logResult(_ result: SpeedTestResult, completion: ((Error?) -> Void)? = nil) {
@@ -65,9 +101,16 @@ final class NetworkLogger {
         completion: @escaping (Error?) -> Void
     ) {
         let authRequest = AuthRequest(username: username, password: password)
+        sendJSONRequest(to: endpoint, body: authRequest, completion: completion)
+    }
 
-        guard let body = try? JSONEncoder().encode(authRequest) else {
-            completion(NSError(domain: "NetworkLogger", code: -1))
+    private func sendJSONRequest<T: Encodable>(
+        to endpoint: URL,
+        body encodableBody: T,
+        completion: @escaping (Error?) -> Void
+    ) {
+        guard let body = try? JSONEncoder().encode(encodableBody) else {
+            completion(NetworkLoggerError.encodingFailed)
             return
         }
 
@@ -76,19 +119,34 @@ final class NetworkLogger {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = body
 
-        URLSession.shared.dataTask(with: request) { _, response, error in
+        URLSession.shared.dataTask(with: request) { data, response, error in
             if let error = error {
                 completion(error)
                 return
             }
 
-            guard let httpResponse = response as? HTTPURLResponse,
-                  (200...299).contains(httpResponse.statusCode) else {
-                completion(NSError(domain: "NetworkLogger", code: -2))
+            guard let httpResponse = response as? HTTPURLResponse else {
+                completion(NetworkLoggerError.requestFailed(statusCode: -1, message: nil))
+                return
+            }
+
+            guard (200...299).contains(httpResponse.statusCode) else {
+                completion(NetworkLoggerError.requestFailed(statusCode: httpResponse.statusCode, message: self.serverErrorMessage(from: data)))
                 return
             }
 
             completion(nil)
         }.resume()
+    }
+
+    private func serverErrorMessage(from data: Data?) -> String? {
+        guard let data,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let message = json["error"] as? String,
+              !message.isEmpty else {
+            return nil
+        }
+
+        return message
     }
 }
