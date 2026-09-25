@@ -106,6 +106,7 @@ struct SettingsView: View {
     @AppStorage("signalDataDisplayMode") private var signalDataDisplayModeRaw: String = SignalDataDisplayMode.numbersAndCircles.rawValue
     @AppStorage("userName") private var userName: String = ""
     @AppStorage("userPassword") private var userPassword: String = ""
+    @AppStorage("userCarrier") private var userCarrier: String = ""
 
     @State private var cacheSnapshot = SignalCircleCache.snapshot()
     @State private var showClearCacheConfirmation = false
@@ -115,6 +116,9 @@ struct SettingsView: View {
     @State private var resetPasswordResultTitle = ""
     @State private var resetPasswordResultMessage = ""
     @State private var isResettingPassword = false
+    @State private var availableCarriers: [String] = []
+    @State private var selectedNewCarrier = ""
+    @State private var isChangingCarrier = false
 
     private var mapRefreshInterval: Binding<MapRefreshInterval> {
         Binding(
@@ -228,6 +232,32 @@ struct SettingsView: View {
                 }
 
                 Section("Account Management") {
+                    HStack {
+                        Text("Current carrier")
+                        Spacer()
+                        Text(userCarrier.isEmpty ? "Not set" : userCarrier)
+                            .foregroundStyle(AppTheme.muted)
+                    }
+
+                    Picker("New carrier", selection: $selectedNewCarrier) {
+                        Text("Select a carrier").tag("")
+                        ForEach(availableCarriers.filter { $0 != userCarrier }, id: \.self) { carrier in
+                            Text(carrier).tag(carrier)
+                        }
+                    }
+                    .disabled(availableCarriers.isEmpty || isChangingCarrier)
+
+                    Button {
+                        changeCarrier()
+                    } label: {
+                        if isChangingCarrier {
+                            ProgressView()
+                        } else {
+                            Text("Change Carrier")
+                        }
+                    }
+                    .disabled(selectedNewCarrier.isEmpty || selectedNewCarrier == userCarrier || isChangingCarrier || userName.isEmpty)
+
                     Button {
                         newPassword = ""
                         showResetPasswordPrompt = true
@@ -259,7 +289,10 @@ struct SettingsView: View {
                     Button("Done") { dismiss() }
                 }
             }
-            .onAppear(perform: refreshCacheSnapshot)
+            .onAppear {
+                refreshCacheSnapshot()
+                Task { await loadCarriers() }
+            }
             .onReceive(NotificationCenter.default.publisher(for: .signalCircleCacheDidChange)) { _ in
                 refreshCacheSnapshot()
             }
@@ -330,6 +363,55 @@ struct SettingsView: View {
                 userPassword = requestedPassword
                 newPassword = ""
                 showResetPasswordResult(title: "Password updated", message: "Your saved password was updated for future account actions.")
+            }
+        }
+    }
+
+    private func loadCarriers() async {
+        guard let url = URL(string: "https://api.kalculator.lol/carriers") else { return }
+        do {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200...299).contains(httpResponse.statusCode) else { return }
+            let names = try JSONDecoder().decode([String].self, from: data)
+            await MainActor.run {
+                availableCarriers = names
+                if selectedNewCarrier.isEmpty {
+                    selectedNewCarrier = names.first(where: { $0 != userCarrier }) ?? ""
+                }
+            }
+        } catch {
+            print("Failed to load carriers:", error)
+        }
+    }
+
+    private func changeCarrier() {
+        let trimmedUsername = userName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedUsername.isEmpty, !userPassword.isEmpty, !userCarrier.isEmpty else {
+            showResetPasswordResult(
+                title: "Carrier not changed",
+                message: "Your saved account details or current carrier are missing. Log out and log back in, then try again."
+            )
+            return
+        }
+        guard !selectedNewCarrier.isEmpty, selectedNewCarrier != userCarrier else { return }
+
+        isChangingCarrier = true
+        let requestedCarrier = selectedNewCarrier
+        NetworkLogger.shared.changeCarrier(
+            username: trimmedUsername,
+            password: userPassword,
+            newCarrier: requestedCarrier
+        ) { error in
+            DispatchQueue.main.async {
+                isChangingCarrier = false
+                if let error {
+                    showResetPasswordResult(title: "Carrier not changed", message: error.localizedDescription)
+                    return
+                }
+                userCarrier = requestedCarrier
+                selectedNewCarrier = availableCarriers.first(where: { $0 != requestedCarrier }) ?? ""
+                showResetPasswordResult(title: "Carrier updated", message: "Your carrier has been changed.")
             }
         }
     }

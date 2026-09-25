@@ -17,12 +17,19 @@ struct SpeedTestResult: Codable {
 struct AuthRequest: Codable {
     let username: String
     let password: String
+    let carrier: String?
 }
 
 struct ResetPasswordRequest: Codable {
     let username: String
     let currentPassword: String
     let newPassword: String
+}
+
+struct ChangeCarrierRequest: Codable {
+    let username: String
+    let password: String
+    let newCarrier: String
 }
 
 private enum NetworkLoggerError: LocalizedError {
@@ -46,9 +53,11 @@ final class NetworkLogger {
     private let registerEndpoint = URL(string: "https://api.kalculator.lol/register")!
     private let loginEndpoint = URL(string: "https://api.kalculator.lol/login")!
     private let resetPasswordEndpoint = URL(string: "https://api.kalculator.lol/reset-password")!
+    private let changeCarrierEndpoint = URL(string: "https://api.kalculator.lol/change-carrier")!
     
-    func register(username: String, password: String, completion: @escaping (Error?) -> Void) {
-        sendAuthRequest(to: registerEndpoint, username: username, password: password, completion: completion)
+    func register(username: String, password: String, carrier: String, completion: @escaping (Error?) -> Void) {
+        let request = AuthRequest(username: username, password: password, carrier: carrier)
+        sendJSONRequest(to: registerEndpoint, body: request, completion: completion)
     }
 
     func login(username: String, password: String, completion: @escaping (Error?) -> Void) {
@@ -68,6 +77,20 @@ final class NetworkLogger {
         )
 
         sendJSONRequest(to: resetPasswordEndpoint, body: resetRequest, completion: completion)
+    }
+
+    func changeCarrier(
+        username: String,
+        password: String,
+        newCarrier: String,
+        completion: @escaping (Error?) -> Void
+    ) {
+        let request = ChangeCarrierRequest(
+            username: username,
+            password: password,
+            newCarrier: newCarrier
+        )
+        sendJSONRequest(to: changeCarrierEndpoint, body: request, completion: completion)
     }
 
     func logResult(_ result: SpeedTestResult, completion: ((Error?) -> Void)? = nil) {
@@ -100,7 +123,7 @@ final class NetworkLogger {
         password: String,
         completion: @escaping (Error?) -> Void
     ) {
-        let authRequest = AuthRequest(username: username, password: password)
+        let authRequest = AuthRequest(username: username, password: password, carrier: nil)
         sendJSONRequest(to: endpoint, body: authRequest, completion: completion)
     }
 

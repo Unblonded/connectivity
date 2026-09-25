@@ -82,7 +82,7 @@ struct ContentView: View {
     @State private var showLeaderboardPage = false
     @State private var showHeaderMenu = false
     @State private var recenterMap: Bool = false
-    
+
     @AppStorage("isLoggedIn") private var isLoggedIn: Bool = false
     @AppStorage("hasRegisteredBefore") private var hasRegisteredBefore: Bool = false
     @AppStorage("userName") private var userName: String = ""
@@ -1086,6 +1086,10 @@ private struct AuthView: View {
     @State private var password = ""
     @State private var errorMessage: String?
     @State private var isSubmitting = false
+    @State private var carriers: [String] = []
+    @State private var selectedCarrier = ""
+    @State private var isLoadingCarriers = false
+    @AppStorage("userCarrier") private var userCarrier: String = ""
 
     let onAuthenticated: (String, AuthMode) -> Void
 
@@ -1095,7 +1099,7 @@ private struct AuthView: View {
     }
 
     private var canSubmit: Bool {
-        !isSubmitting && !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !password.isEmpty
+        !isSubmitting && !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !password.isEmpty && (mode != .register || !selectedCarrier.isEmpty)
     }
 
     private var title: String {
@@ -1159,6 +1163,27 @@ private struct AuthView: View {
                         .background(Color.white.opacity(0.06))
                         .clipShape(RoundedRectangle(cornerRadius: 8))
 
+                    if mode == .register {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Carrier")
+                                .font(.caption)
+                                .foregroundStyle(AppTheme.muted)
+
+                            Picker("Carrier", selection: $selectedCarrier) {
+                                Text("Select a carrier").tag("")
+                                ForEach(carriers, id: \.self) { carrier in
+                                    Text(carrier).tag(carrier)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(12)
+                            .background(Color.white.opacity(0.06))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                            .tint(AppTheme.accent)
+                        }
+                    }
+
                     if let errorMessage {
                         Text(errorMessage)
                             .font(.caption)
@@ -1193,12 +1218,17 @@ private struct AuthView: View {
             .padding(24)
             .frame(maxWidth: 360)
         }
+        .task { await loadCarriers() }
     }
 
     private func submit() {
         let trimmedUsername = username.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedUsername.isEmpty, !password.isEmpty else {
             errorMessage = "Enter a username and password."
+            return
+        }
+        guard mode != .register || !selectedCarrier.isEmpty else {
+            errorMessage = "Select a carrier to continue."
             return
         }
 
@@ -1218,15 +1248,50 @@ private struct AuthView: View {
                 }
 
                 UserDefaults.standard.set(submittedPassword, forKey: "userPassword")
+                if mode == .register {
+                    userCarrier = selectedCarrier
+                }
                 password = ""
                 onAuthenticated(trimmedUsername, mode)
             }
         }
 
         if mode == .register {
-            NetworkLogger.shared.register(username: trimmedUsername, password: password, completion: completion)
+            NetworkLogger.shared.register(
+                username: trimmedUsername,
+                password: password,
+                carrier: selectedCarrier,
+                completion: completion
+            )
         } else {
-            NetworkLogger.shared.login(username: trimmedUsername, password: password, completion: completion)
+            NetworkLogger.shared.login(
+                username: trimmedUsername, password: password, completion: completion)
+        }
+    }
+
+    func loadCarriers() async {
+        guard let url = URL(string: "https://api.kalculator.lol/carriers") else { return }
+
+        isLoadingCarriers = true
+        defer { isLoadingCarriers = false }
+
+        do {
+            var request = URLRequest(url: url)
+            request.httpMethod = "GET"
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+
+            guard let httpResponse = response as? HTTPURLResponse,
+                  200..<300 ~= httpResponse.statusCode else {
+                return
+            }
+
+            let serverCarriers = try JSONDecoder().decode([String].self, from: data)
+            if !serverCarriers.isEmpty {
+                carriers = serverCarriers
+            }
+        } catch {
+            print("Failed to load carriers:", error)
         }
     }
 }
