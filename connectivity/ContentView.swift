@@ -1089,6 +1089,7 @@ private struct AuthView: View {
     @State private var carriers: [String] = []
     @State private var selectedCarrier = ""
     @State private var isLoadingCarriers = false
+    @State private var carrierLoadError: String?
     @AppStorage("userCarrier") private var userCarrier: String = ""
 
     let onAuthenticated: (String, AuthMode) -> Void
@@ -1170,17 +1171,29 @@ private struct AuthView: View {
                                 .foregroundStyle(AppTheme.muted)
 
                             Picker("Carrier", selection: $selectedCarrier) {
-                                Text("Select a carrier").tag("")
+                                Text(isLoadingCarriers ? "Loading carriers…" : "Select a carrier").tag("")
                                 ForEach(carriers, id: \.self) { carrier in
                                     Text(carrier).tag(carrier)
                                 }
                             }
+                            .disabled(isLoadingCarriers || carriers.isEmpty)
                             .pickerStyle(.menu)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(12)
                             .background(Color.white.opacity(0.06))
                             .clipShape(RoundedRectangle(cornerRadius: 8))
                             .tint(AppTheme.accent)
+
+                            if let carrierLoadError {
+                                Text(carrierLoadError)
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
+                                Button("Retry loading carriers") {
+                                    Task { await loadCarriers() }
+                                }
+                                .font(.caption)
+                                .disabled(isLoadingCarriers)
+                            }
                         }
                     }
 
@@ -1208,6 +1221,9 @@ private struct AuthView: View {
                         mode = mode == .register ? .login : .register
                         errorMessage = nil
                         password = ""
+                        if mode == .register {
+                            Task { await loadCarriers() }
+                        }
                     }
                     .font(.footnote)
                     .foregroundStyle(AppTheme.accent)
@@ -1218,7 +1234,11 @@ private struct AuthView: View {
             .padding(24)
             .frame(maxWidth: 360)
         }
-        .task { await loadCarriers() }
+        .task {
+            if mode == .register {
+                await loadCarriers()
+            }
+        }
     }
 
     private func submit() {
@@ -1273,6 +1293,7 @@ private struct AuthView: View {
         guard let url = URL(string: "https://api.kalculator.lol/carriers") else { return }
 
         isLoadingCarriers = true
+        carrierLoadError = nil
         defer { isLoadingCarriers = false }
 
         do {
@@ -1283,15 +1304,21 @@ private struct AuthView: View {
 
             guard let httpResponse = response as? HTTPURLResponse,
                   200..<300 ~= httpResponse.statusCode else {
+                carrierLoadError = "Could not load carriers. Try again."
                 return
             }
 
             let serverCarriers = try JSONDecoder().decode([String].self, from: data)
-            if !serverCarriers.isEmpty {
-                carriers = serverCarriers
+            carriers = serverCarriers
+            if !serverCarriers.contains(selectedCarrier) {
+                selectedCarrier = ""
+            }
+            if serverCarriers.isEmpty {
+                carrierLoadError = "No carriers are currently available."
             }
         } catch {
             print("Failed to load carriers:", error)
+            carrierLoadError = "Could not load carriers. Check your connection and try again."
         }
     }
 }

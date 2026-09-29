@@ -32,6 +32,11 @@ struct ChangeCarrierRequest: Codable {
     let newCarrier: String
 }
 
+struct DeleteAccountRequest: Codable {
+    let username: String
+    let password: String
+}
+
 private enum NetworkLoggerError: LocalizedError {
     case encodingFailed
     case requestFailed(statusCode: Int, message: String?)
@@ -54,6 +59,7 @@ final class NetworkLogger {
     private let loginEndpoint = URL(string: "https://api.kalculator.lol/login")!
     private let resetPasswordEndpoint = URL(string: "https://api.kalculator.lol/reset-password")!
     private let changeCarrierEndpoint = URL(string: "https://api.kalculator.lol/change-carrier")!
+    private let deleteAccountEndpoint = URL(string: "https://api.kalculator.lol/delete-account")!
     
     func register(username: String, password: String, carrier: String, completion: @escaping (Error?) -> Void) {
         let request = AuthRequest(username: username, password: password, carrier: carrier)
@@ -91,6 +97,11 @@ final class NetworkLogger {
             newCarrier: newCarrier
         )
         sendJSONRequest(to: changeCarrierEndpoint, body: request, completion: completion)
+    }
+
+    func deleteAccount(username: String, password: String, completion: @escaping (Error?) -> Void) {
+        let request = DeleteAccountRequest(username: username, password: password)
+        sendJSONRequest(to: deleteAccountEndpoint, body: request, completion: completion)
     }
 
     func logResult(_ result: SpeedTestResult, completion: ((Error?) -> Void)? = nil) {
@@ -137,6 +148,11 @@ final class NetworkLogger {
             return
         }
 
+        let shouldLogCarrierRequest = endpoint == changeCarrierEndpoint
+        if shouldLogCarrierRequest {
+            print("[change-carrier] Request body: \(String(decoding: body, as: UTF8.self))")
+        }
+
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -144,13 +160,25 @@ final class NetworkLogger {
 
         URLSession.shared.dataTask(with: request) { data, response, error in
             if let error = error {
+                if shouldLogCarrierRequest {
+                    print("[change-carrier] Network error: \(error.localizedDescription)")
+                }
                 completion(error)
                 return
             }
 
             guard let httpResponse = response as? HTTPURLResponse else {
+                if shouldLogCarrierRequest {
+                    print("[change-carrier] Missing HTTP response")
+                }
                 completion(NetworkLoggerError.requestFailed(statusCode: -1, message: nil))
                 return
+            }
+
+            if shouldLogCarrierRequest {
+                let responseBody = data.map { String(decoding: $0, as: UTF8.self) } ?? "<empty>"
+                print("[change-carrier] Response status: \(httpResponse.statusCode)")
+                print("[change-carrier] Response body: \(responseBody)")
             }
 
             guard (200...299).contains(httpResponse.statusCode) else {

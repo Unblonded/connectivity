@@ -107,6 +107,8 @@ struct SettingsView: View {
     @AppStorage("userName") private var userName: String = ""
     @AppStorage("userPassword") private var userPassword: String = ""
     @AppStorage("userCarrier") private var userCarrier: String = ""
+    @AppStorage("isLoggedIn") private var isLoggedIn: Bool = false
+    @AppStorage("hasRegisteredBefore") private var hasRegisteredBefore: Bool = false
 
     @State private var cacheSnapshot = SignalCircleCache.snapshot()
     @State private var showClearCacheConfirmation = false
@@ -119,12 +121,21 @@ struct SettingsView: View {
     @State private var availableCarriers: [String] = []
     @State private var selectedNewCarrier = ""
     @State private var isChangingCarrier = false
+    @State private var showDeleteAccountConfirmation = false
+    @State private var isDeletingAccount = false
 
     private var mapRefreshInterval: Binding<MapRefreshInterval> {
         Binding(
             get: { MapRefreshInterval(rawValue: mapRefreshIntervalRaw) ?? .min1 },
             set: { mapRefreshIntervalRaw = $0.rawValue }
         )
+    }
+
+    private var carrierOptions: [String] {
+        guard !userCarrier.isEmpty, !availableCarriers.contains(userCarrier) else {
+            return availableCarriers
+        }
+        return [userCarrier] + availableCarriers
     }
     
     private var speedTestInterval: Binding<SpeedTestInterval> {
@@ -232,31 +243,19 @@ struct SettingsView: View {
                 }
 
                 Section("Account Management") {
-                    HStack {
-                        Text("Current carrier")
-                        Spacer()
-                        Text(userCarrier.isEmpty ? "Not set" : userCarrier)
-                            .foregroundStyle(AppTheme.muted)
-                    }
-
-                    Picker("New carrier", selection: $selectedNewCarrier) {
-                        Text("Select a carrier").tag("")
-                        ForEach(availableCarriers.filter { $0 != userCarrier }, id: \.self) { carrier in
+                    Picker("Carrier", selection: $selectedNewCarrier) {
+                        if userCarrier.isEmpty {
+                            Text("Not set").tag("")
+                        }
+                        ForEach(carrierOptions, id: \.self) { carrier in
                             Text(carrier).tag(carrier)
                         }
                     }
-                    .disabled(availableCarriers.isEmpty || isChangingCarrier)
-
-                    Button {
-                        changeCarrier()
-                    } label: {
-                        if isChangingCarrier {
-                            ProgressView()
-                        } else {
-                            Text("Change Carrier")
-                        }
+                    .disabled(availableCarriers.isEmpty || isChangingCarrier || userName.isEmpty)
+                    .onChange(of: selectedNewCarrier) { _, newCarrier in
+                        guard !newCarrier.isEmpty, newCarrier != userCarrier else { return }
+                        changeCarrier(to: newCarrier)
                     }
-                    .disabled(selectedNewCarrier.isEmpty || selectedNewCarrier == userCarrier || isChangingCarrier || userName.isEmpty)
 
                     Button {
                         newPassword = ""
@@ -269,6 +268,17 @@ struct SettingsView: View {
                         }
                     }
                     .disabled(isResettingPassword || userName.isEmpty)
+
+                    Button(role: .destructive) {
+                        showDeleteAccountConfirmation = true
+                    } label: {
+                        if isDeletingAccount {
+                            ProgressView()
+                        } else {
+                            Text("Delete Account")
+                        }
+                    }
+                    .disabled(isDeletingAccount || userName.isEmpty || userPassword.isEmpty)
                 }
                 
                 Section("Display Idle Timeout") {
@@ -320,6 +330,14 @@ struct SettingsView: View {
                 Button("OK", role: .cancel) { }
             } message: {
                 Text(resetPasswordResultMessage)
+            }
+            .alert("Delete account permanently?", isPresented: $showDeleteAccountConfirmation) {
+                Button("Delete Account", role: .destructive) {
+                    deleteAccount()
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("This permanently deletes your account. You will be signed out and need to register again to use this account.")
             }
         }
     }
@@ -376,28 +394,26 @@ struct SettingsView: View {
             let names = try JSONDecoder().decode([String].self, from: data)
             await MainActor.run {
                 availableCarriers = names
-                if selectedNewCarrier.isEmpty {
-                    selectedNewCarrier = names.first(where: { $0 != userCarrier }) ?? ""
-                }
+                selectedNewCarrier = userCarrier
             }
         } catch {
             print("Failed to load carriers:", error)
         }
     }
 
-    private func changeCarrier() {
+    private func changeCarrier(to requestedCarrier: String) {
         let trimmedUsername = userName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedUsername.isEmpty, !userPassword.isEmpty, !userCarrier.isEmpty else {
+        guard !trimmedUsername.isEmpty, !userPassword.isEmpty else {
+            selectedNewCarrier = userCarrier
             showResetPasswordResult(
                 title: "Carrier not changed",
-                message: "Your saved account details or current carrier are missing. Log out and log back in, then try again."
+                message: "Your saved username or password is missing. Log out and log back in, then try again."
             )
             return
         }
-        guard !selectedNewCarrier.isEmpty, selectedNewCarrier != userCarrier else { return }
+        guard !requestedCarrier.isEmpty, requestedCarrier != userCarrier else { return }
 
         isChangingCarrier = true
-        let requestedCarrier = selectedNewCarrier
         NetworkLogger.shared.changeCarrier(
             username: trimmedUsername,
             password: userPassword,
@@ -406,12 +422,40 @@ struct SettingsView: View {
             DispatchQueue.main.async {
                 isChangingCarrier = false
                 if let error {
+                    selectedNewCarrier = userCarrier
                     showResetPasswordResult(title: "Carrier not changed", message: error.localizedDescription)
                     return
                 }
                 userCarrier = requestedCarrier
-                selectedNewCarrier = availableCarriers.first(where: { $0 != requestedCarrier }) ?? ""
+                selectedNewCarrier = requestedCarrier
                 showResetPasswordResult(title: "Carrier updated", message: "Your carrier has been changed.")
+            }
+        }
+    }
+
+    private func deleteAccount() {
+        let trimmedUsername = userName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedUsername.isEmpty, !userPassword.isEmpty else {
+            showResetPasswordResult(title: "Account not deleted", message: "Your saved username or password is missing. Log out and log back in, then try again.")
+            return
+        }
+
+        isDeletingAccount = true
+        NetworkLogger.shared.deleteAccount(username: trimmedUsername, password: userPassword) { error in
+            DispatchQueue.main.async {
+                isDeletingAccount = false
+                if let error {
+                    showResetPasswordResult(title: "Account not deleted", message: error.localizedDescription)
+                    return
+                }
+
+                userName = ""
+                userPassword = ""
+                userCarrier = ""
+                selectedNewCarrier = ""
+                hasRegisteredBefore = false
+                isLoggedIn = false
+                dismiss()
             }
         }
     }
