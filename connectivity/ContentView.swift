@@ -82,10 +82,13 @@ struct ContentView: View {
     @State private var showLeaderboardPage = false
     @State private var showHeaderMenu = false
     @State private var recenterMap: Bool = false
+    @State private var carrierFilterOptions: [String] = []
+    @State private var activeCirclesRequestID = UUID()
 
     @AppStorage("isLoggedIn") private var isLoggedIn: Bool = false
     @AppStorage("hasRegisteredBefore") private var hasRegisteredBefore: Bool = false
     @AppStorage("userName") private var userName: String = ""
+    @AppStorage("mapCarrierFilter") private var carrierFilter: String = "All"
     
     @AppStorage("viewOnlyMode") private var viewOnlyMode: Bool = false
     @AppStorage("keepScreenAwake") private var keepScreenAwake: Bool = false
@@ -131,7 +134,9 @@ struct ContentView: View {
             updateAddressIfNeeded(for: updatedLocation)
         }
         .onReceive(NotificationCenter.default.publisher(for: .signalCircleCacheDidChange)) { _ in
-            circles = SignalCircleCache.loadEntries().map { $0.toSignalCircle() }
+            if carrierFilter == "All" {
+                circles = SignalCircleCache.loadEntries().map { $0.toSignalCircle() }
+            }
         }
         .onAppear {
             guard isLoggedIn else { return }
@@ -232,7 +237,31 @@ struct ContentView: View {
             
             Spacer(minLength: 8)
 
-            HStack(spacing: 14) {
+            HStack(spacing: 9) {
+                Menu {
+                    carrierMenuButton(title: "All", value: "All")
+                    ForEach(carrierFilterOptions, id: \.self) { carrier in
+                        carrierMenuButton(title: carrier, value: carrier)
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        Text(carrierFilter == "All" ? "All" : carrierFilter)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .frame(maxWidth: 64)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 9, weight: .bold))
+                    }
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 7)
+                    .background(Color.white.opacity(0.08), in: Capsule())
+                }
+                .onChange(of: carrierFilter) { _, _ in
+                    loadCircles()
+                }
+
                 headerButton(systemName: "line.3.horizontal") {
                     showHeaderMenu.toggle()
                 }
@@ -292,8 +321,21 @@ struct ContentView: View {
         .shadow(color: .black.opacity(0.25), radius: 12, y: 8)
         .padding(.top, 56)
         .padding(.trailing, 70)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
         .zIndex(1)
+    }
+
+    @ViewBuilder
+    private func carrierMenuButton(title: String, value: String) -> some View {
+        Button {
+            carrierFilter = value
+        } label: {
+            if carrierFilter == value {
+                Label(title, systemImage: "checkmark")
+            } else {
+                Text(title)
+            }
+        }
     }
 
     private func headerMenuItem(title: String, systemName: String, action: @escaping () -> Void) -> some View {
@@ -778,6 +820,28 @@ struct ContentView: View {
     private func loadCircles() {
         guard isLoggedIn else { return }
 
+        let requestID = UUID()
+        activeCirclesRequestID = requestID
+
+        if carrierFilter != "All" {
+            let selectedCarrier = carrierFilter
+            guard let baseURL = URL(string: "https://api.kalculator.lol/calculated") else { return }
+            let url = baseURL.appendingPathComponent(selectedCarrier)
+
+            NetworkClient.shared.get(url: url, as: [SignalCircleJSON].self) { fetched, error in
+                DispatchQueue.main.async {
+                    guard activeCirclesRequestID == requestID else { return }
+                    if let error {
+                        print("Failed to load circles for \(selectedCarrier): \(error)")
+                        return
+                    }
+                    guard let fetched else { return }
+                    circles = fetched.map { $0.toSignalCircle() }
+                }
+            }
+            return
+        }
+
         let cachedEntries = SignalCircleCache.loadEntries()
         let since = SignalCircleCache.highestID(in: cachedEntries)
 
@@ -789,6 +853,7 @@ struct ContentView: View {
 
         NetworkClient.shared.get(url: url, as: [SignalCircleJSON].self) { fetched, error in
             DispatchQueue.main.async {
+                guard activeCirclesRequestID == requestID else { return }
                 if let error = error {
                     print("Failed to load circles: \(error)")
                     return
@@ -916,10 +981,29 @@ struct ContentView: View {
     private func startAuthenticatedServices() {
         UserStore.shared.requestPermissions()
         UserStore.shared.startUpdates()
+        loadCarrierFilterOptions()
         loadCircles()
         restartSpeedTestTimer()
         restartMapRefreshTimer()
         UIApplication.shared.isIdleTimerDisabled = keepScreenAwake
+    }
+
+    private func loadCarrierFilterOptions() {
+        guard let url = URL(string: "https://api.kalculator.lol/populated-carriers") else { return }
+
+        NetworkClient.shared.get(url: url, as: [String].self) { fetched, error in
+            DispatchQueue.main.async {
+                if let error {
+                    print("Failed to load carrier filter options: \(error)")
+                    return
+                }
+                guard let fetched else { return }
+                carrierFilterOptions = fetched
+                if carrierFilter != "All", !fetched.contains(carrierFilter) {
+                    carrierFilter = "All"
+                }
+            }
+        }
     }
 
     private func stopAuthenticatedServices() {

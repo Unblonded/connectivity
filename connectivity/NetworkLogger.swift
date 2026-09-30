@@ -109,9 +109,11 @@ final class NetworkLogger {
         UserStore.shared.updateSpeed(downloadMbps: result.downloadMbps, uploadMbps: result.uploadMbps)
 
         let username = UserDefaults.standard.string(forKey: "userName") ?? ""
+        let carrier = UserDefaults.standard.string(forKey: "userCarrier") ?? ""
 
         var dict = (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(result))) as? [String: Any] ?? [:]
         dict["username"] = username
+        dict["carrier"] = carrier
 
         guard let body = try? JSONSerialization.data(withJSONObject: dict) else {
             completion?(NSError(domain: "NetworkLogger", code: -1))
