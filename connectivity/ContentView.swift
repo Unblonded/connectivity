@@ -1202,6 +1202,7 @@ private struct OutageReportSheet: View {
     let location: CLLocationCoordinate2D
 
     @State private var message = ""
+    @State private var locationAddress = "Looking up address…"
     @State private var isSubmitting = false
     @State private var showResultAlert = false
     @State private var resultTitle = ""
@@ -1212,7 +1213,7 @@ private struct OutageReportSheet: View {
         NavigationStack {
             Form {
                 Section("Outage location") {
-                    Text(String(format: "%.5f, %.5f", location.latitude, location.longitude))
+                    Text(locationAddress)
                         .foregroundStyle(AppTheme.muted)
                 }
 
@@ -1260,6 +1261,33 @@ private struct OutageReportSheet: View {
         .tint(AppTheme.accent)
         .preferredColorScheme(.dark)
         .presentationDetents([.medium, .large])
+        .task {
+            await lookupLocationAddress()
+        }
+    }
+
+    private func lookupLocationAddress() async {
+        let tappedLocation = CLLocation(latitude: location.latitude, longitude: location.longitude)
+        guard let request = MKReverseGeocodingRequest(location: tappedLocation) else {
+            locationAddress = "Address unavailable"
+            return
+        }
+
+        let mapItems = try? await request.mapItems
+        guard let mapItem = mapItems?.first else {
+            locationAddress = "Address unavailable"
+            return
+        }
+
+        let address = mapItem.address?.shortAddress
+            ?? mapItem.address?.fullAddress
+            ?? mapItem.addressRepresentations?.fullAddress(includingRegion: false, singleLine: true)
+            ?? mapItem.name
+        if let address, !address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            locationAddress = address
+        } else {
+            locationAddress = "Address unavailable"
+        }
     }
 
     private func submitReport() {
