@@ -103,6 +103,7 @@ struct ConnectivityMapView: UIViewRepresentable {
     var dataDisplayMode: SignalDataDisplayMode = .numbersAndCircles
     var showsRouteBuilderOverlays: Bool = true
     var allowsRoutePointSelection: Bool = true
+    var onMapTap: ((CLLocationCoordinate2D) -> Void)? = nil
     @Binding var recenterMap: Bool
     
     func makeUIView(context: Context) -> MKMapView {
@@ -120,6 +121,8 @@ struct ConnectivityMapView: UIViewRepresentable {
     }
 
     func updateUIView(_ map: MKMapView, context: Context) {
+        context.coordinator.parent = self
+
         if recenterMap {
             let coord = UserStore.shared.coordinate
             let region = MKCoordinateRegion(
@@ -219,10 +222,16 @@ struct ConnectivityMapView: UIViewRepresentable {
         }
 
         @objc func handleTap(_ gesture: UITapGestureRecognizer) {
-            guard parent.allowsRoutePointSelection else { return }
             guard let map = gesture.view as? MKMapView else { return }
             let point = gesture.location(in: map)
             let coordinate = map.convert(point, toCoordinateFrom: map)
+
+            if let onMapTap = parent.onMapTap {
+                onMapTap(coordinate)
+                return
+            }
+
+            guard parent.allowsRoutePointSelection else { return }
 
             if parent.startPoint == nil {
                 parent.startPoint = coordinate

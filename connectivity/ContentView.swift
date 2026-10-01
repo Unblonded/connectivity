@@ -82,6 +82,9 @@ struct ContentView: View {
     @State private var showLeaderboardPage = false
     @State private var showHeaderMenu = false
     @State private var recenterMap: Bool = false
+    @State private var isReportingOutage = false
+    @State private var showOutageReportSheet = false
+    @State private var outageReportLocation: CLLocationCoordinate2D?
     @State private var carrierFilterOptions: [String] = []
     @State private var activeCirclesRequestID = UUID()
 
@@ -168,12 +171,30 @@ struct ContentView: View {
                 dataDisplayMode: signalDataDisplayMode,
                 showsRouteBuilderOverlays: false,
                 allowsRoutePointSelection: false,
+                onMapTap: { coordinate in
+                    guard isReportingOutage else { return }
+                    outageReportLocation = coordinate
+                    isReportingOutage = false
+                    showOutageReportSheet = true
+                },
                 recenterMap: $recenterMap
             )
             .ignoresSafeArea(edges: .bottom)
 
             VStack(spacing: 0) {
                 header
+                if isReportingOutage {
+                    HStack(spacing: 8) {
+                        Text("Tap the map where the outage is happening")
+                            .font(.caption.weight(.medium))
+                        Spacer(minLength: 4)
+                        Button("Cancel") { isReportingOutage = false }
+                            .font(.caption.weight(.semibold))
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                    .background(.ultraThinMaterial)
+                }
                 Spacer()
             }
 
@@ -193,6 +214,12 @@ struct ContentView: View {
         .sheet(isPresented: $showSettings) {
             SettingsView()
                 .preferredColorScheme(.dark)
+        }
+        .sheet(isPresented: $showOutageReportSheet) {
+            if let outageReportLocation {
+                OutageReportSheet(location: outageReportLocation)
+                    .preferredColorScheme(.dark)
+            }
         }
         .fullScreenCover(isPresented: $showRouteBuilderPage) {
             routeBuilderPage
@@ -244,23 +271,27 @@ struct ContentView: View {
                         carrierMenuButton(title: carrier, value: carrier)
                     }
                 } label: {
-                    HStack(spacing: 5) {
-                        Text(carrierFilter == "All" ? "All" : carrierFilter)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                            .frame(maxWidth: 64)
+                    HStack(spacing: 4) {
+                        Image(systemName: "square.3.layers.3d")
+                            .font(.system(size: 16, weight: .semibold))
                         Image(systemName: "chevron.down")
-                            .font(.system(size: 9, weight: .bold))
+                            .font(.system(size: 8, weight: .bold))
                     }
-                    .font(.caption.weight(.semibold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 8)
-                    .padding(.vertical, 7)
+                    .padding(.vertical, 8)
                     .background(Color.white.opacity(0.08), in: Capsule())
                 }
+                .accessibilityLabel("Carrier map layer: \(carrierFilter)")
                 .onChange(of: carrierFilter) { _, _ in
                     loadCircles()
                 }
+
+                headerButton(systemName: "exclamationmark.triangle") {
+                    isReportingOutage = true
+                    showHeaderMenu = false
+                }
+                .accessibilityLabel("Report an outage")
 
                 headerButton(systemName: "line.3.horizontal") {
                     showHeaderMenu.toggle()
@@ -1160,6 +1191,98 @@ struct ContentView: View {
         }
 
         return totalScore / Double(sampled.count)
+    }
+}
+
+private struct OutageReportSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage("userName") private var username: String = ""
+    @AppStorage("userPassword") private var password: String = ""
+
+    let location: CLLocationCoordinate2D
+
+    @State private var message = ""
+    @State private var isSubmitting = false
+    @State private var showResultAlert = false
+    @State private var resultTitle = ""
+    @State private var resultMessage = ""
+    @State private var reportSucceeded = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Outage location") {
+                    Text(String(format: "%.5f, %.5f", location.latitude, location.longitude))
+                        .foregroundStyle(AppTheme.muted)
+                }
+
+                Section("What is happening?") {
+                    TextField("Briefly describe the outage", text: $message, axis: .vertical)
+                        .lineLimit(3...5)
+                        .onChange(of: message) { _, updatedMessage in
+                            if updatedMessage.count > 100 {
+                                message = String(updatedMessage.prefix(100))
+                            }
+                        }
+
+                    HStack {
+                        Spacer()
+                        Text("\(message.count)/100")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.muted)
+                    }
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(AppTheme.bg)
+            .navigationTitle("Report outage")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                        .disabled(isSubmitting)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(isSubmitting ? "Sending…" : "Send") {
+                        submitReport()
+                    }
+                    .disabled(isSubmitting || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || username.isEmpty || password.isEmpty)
+                }
+            }
+            .alert(resultTitle, isPresented: $showResultAlert) {
+                Button("OK", role: .cancel) {
+                    if reportSucceeded { dismiss() }
+                }
+            } message: {
+                Text(resultMessage)
+            }
+        }
+        .tint(AppTheme.accent)
+        .preferredColorScheme(.dark)
+        .presentationDetents([.medium, .large])
+    }
+
+    private func submitReport() {
+        let trimmedMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedMessage.isEmpty, trimmedMessage.count <= 100,
+              !username.isEmpty, !password.isEmpty else { return }
+
+        isSubmitting = true
+        NetworkLogger.shared.reportOutage(
+            username: username,
+            password: password,
+            latitude: location.latitude,
+            longitude: location.longitude,
+            message: trimmedMessage
+        ) { error in
+            DispatchQueue.main.async {
+                isSubmitting = false
+                reportSucceeded = error == nil
+                resultTitle = error == nil ? "Report sent" : "Report not sent"
+                resultMessage = error?.localizedDescription ?? "Thanks for reporting this outage."
+                showResultAlert = true
+            }
+        }
     }
 }
 

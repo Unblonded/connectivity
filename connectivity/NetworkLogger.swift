@@ -37,6 +37,14 @@ struct DeleteAccountRequest: Codable {
     let password: String
 }
 
+struct OutageReportRequest: Codable {
+    let username: String
+    let password: String
+    let latitude: Double
+    let longitude: Double
+    let message: String
+}
+
 private enum NetworkLoggerError: LocalizedError {
     case encodingFailed
     case requestFailed(statusCode: Int, message: String?)
@@ -60,6 +68,7 @@ final class NetworkLogger {
     private let resetPasswordEndpoint = URL(string: "https://api.kalculator.lol/reset-password")!
     private let changeCarrierEndpoint = URL(string: "https://api.kalculator.lol/change-carrier")!
     private let deleteAccountEndpoint = URL(string: "https://api.kalculator.lol/delete-account")!
+    private let reportOutageEndpoint = URL(string: "https://api.kalculator.lol/report-outage")!
     
     func register(username: String, password: String, carrier: String, completion: @escaping (Error?) -> Void) {
         let request = AuthRequest(username: username, password: password, carrier: carrier)
@@ -102,6 +111,24 @@ final class NetworkLogger {
     func deleteAccount(username: String, password: String, completion: @escaping (Error?) -> Void) {
         let request = DeleteAccountRequest(username: username, password: password)
         sendJSONRequest(to: deleteAccountEndpoint, body: request, completion: completion)
+    }
+
+    func reportOutage(
+        username: String,
+        password: String,
+        latitude: Double,
+        longitude: Double,
+        message: String,
+        completion: @escaping (Error?) -> Void
+    ) {
+        let request = OutageReportRequest(
+            username: username,
+            password: password,
+            latitude: latitude,
+            longitude: longitude,
+            message: message
+        )
+        sendJSONRequest(to: reportOutageEndpoint, body: request, completion: completion)
     }
 
     func logResult(_ result: SpeedTestResult, completion: ((Error?) -> Void)? = nil) {
