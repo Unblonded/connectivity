@@ -40,6 +40,69 @@ struct SignalCircleJSON: Codable {
     }
 }
 
+struct OutageReport: Codable, Identifiable {
+    let id: Int
+    let username: String
+    let location: Location
+    let message: String
+    let timestamp: Int64
+
+    struct Location: Codable {
+        let lat: Double
+        let lon: Double
+    }
+
+    var coordinate: CLLocationCoordinate2D {
+        CLLocationCoordinate2D(latitude: location.lat, longitude: location.lon)
+    }
+}
+
+final class OutageReportAnnotation: NSObject, MKAnnotation {
+    let reportID: Int
+    let coordinate: CLLocationCoordinate2D
+    let title: String?
+    let subtitle: String?
+
+    init(report: OutageReport) {
+        reportID = report.id
+        coordinate = report.coordinate
+        title = "Reported outage"
+        subtitle = report.message
+    }
+}
+
+fileprivate struct MapCoordinateState: Equatable {
+    let latitude: Double
+    let longitude: Double
+
+    init(_ coordinate: CLLocationCoordinate2D) {
+        latitude = coordinate.latitude
+        longitude = coordinate.longitude
+    }
+}
+
+fileprivate struct MapCircleState: Equatable {
+    let coordinate: MapCoordinateState
+    let radius: CLLocationDistance
+    let score: Int
+}
+
+fileprivate struct MapOutageState: Equatable {
+    let id: Int
+    let coordinate: MapCoordinateState
+    let message: String
+}
+
+fileprivate struct MapRenderState: Equatable {
+    let circles: [MapCircleState]
+    let displayMode: String
+    let showsRouteBuilderOverlays: Bool
+    let startPoint: MapCoordinateState?
+    let endPoint: MapCoordinateState?
+    let routeCoordinates: [MapCoordinateState]
+    let outageReports: [MapOutageState]
+}
+
 final class SpeedLabelAnnotation: NSObject, MKAnnotation {
     let coordinate: CLLocationCoordinate2D
     let score: Int
@@ -104,6 +167,7 @@ struct ConnectivityMapView: UIViewRepresentable {
     var showsRouteBuilderOverlays: Bool = true
     var allowsRoutePointSelection: Bool = true
     var onMapTap: ((CLLocationCoordinate2D) -> Void)? = nil
+    var outageReports: [OutageReport] = []
     @Binding var recenterMap: Bool
     
     func makeUIView(context: Context) -> MKMapView {
@@ -132,6 +196,31 @@ struct ConnectivityMapView: UIViewRepresentable {
             map.setRegion(region, animated: true)
             DispatchQueue.main.async { self.recenterMap = false }
         }
+
+        let renderState = MapRenderState(
+            circles: circles.map {
+                MapCircleState(
+                    coordinate: MapCoordinateState($0.coordinate),
+                    radius: $0.radius,
+                    score: $0.score
+                )
+            },
+            displayMode: dataDisplayMode.rawValue,
+            showsRouteBuilderOverlays: showsRouteBuilderOverlays,
+            startPoint: startPoint.map(MapCoordinateState.init),
+            endPoint: endPoint.map(MapCoordinateState.init),
+            routeCoordinates: routeCoordinates.map(MapCoordinateState.init),
+            outageReports: outageReports.map {
+                MapOutageState(
+                    id: $0.id,
+                    coordinate: MapCoordinateState($0.coordinate),
+                    message: $0.message
+                )
+            }
+        )
+
+        guard context.coordinator.lastRenderState != renderState else { return }
+        context.coordinator.lastRenderState = renderState
         
         let customAnnotations = map.annotations.filter { !($0 is MKUserLocation) }
         map.removeAnnotations(customAnnotations)
@@ -154,6 +243,10 @@ struct ConnectivityMapView: UIViewRepresentable {
                     score: circle.score
                 )
             }
+        }
+
+        for report in outageReports {
+            map.addAnnotation(OutageReportAnnotation(report: report))
         }
 
         if showsRouteBuilderOverlays, let start = startPoint {
@@ -207,6 +300,7 @@ struct ConnectivityMapView: UIViewRepresentable {
 
     final class Coordinator: NSObject, MKMapViewDelegate {
         var parent: ConnectivityMapView
+        fileprivate var lastRenderState: MapRenderState?
         private var hasCenteredOnce = false
 
         init(_ parent: ConnectivityMapView) { self.parent = parent }
@@ -254,6 +348,19 @@ struct ConnectivityMapView: UIViewRepresentable {
                 view.glyphText = "\(speedAnnotation.score)"
                 view.markerTintColor = uiColorForScore(speedAnnotation.score)
                 view.canShowCallout = false
+                view.displayPriority = .required
+                return view
+            }
+
+            if annotation is OutageReportAnnotation {
+                let identifier = "outageReport"
+                let view = mapView.dequeueReusableAnnotationView(withIdentifier: identifier) as? MKMarkerAnnotationView
+                    ?? MKMarkerAnnotationView(annotation: annotation, reuseIdentifier: identifier)
+
+                view.annotation = annotation
+                view.glyphImage = UIImage(systemName: "exclamationmark.triangle.fill")
+                view.markerTintColor = .systemOrange
+                view.canShowCallout = true
                 view.displayPriority = .required
                 return view
             }

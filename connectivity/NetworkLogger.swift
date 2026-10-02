@@ -40,9 +40,13 @@ struct DeleteAccountRequest: Codable {
 struct OutageReportRequest: Codable {
     let username: String
     let password: String
-    let latitude: Double
-    let longitude: Double
+    let location: Location
     let message: String
+
+    struct Location: Codable {
+        let lat: Double
+        let lon: Double
+    }
 }
 
 private enum NetworkLoggerError: LocalizedError {
@@ -124,8 +128,7 @@ final class NetworkLogger {
         let request = OutageReportRequest(
             username: username,
             password: password,
-            latitude: latitude,
-            longitude: longitude,
+            location: OutageReportRequest.Location(lat: latitude, lon: longitude),
             message: message
         )
         sendJSONRequest(to: reportOutageEndpoint, body: request, completion: completion)

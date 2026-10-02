@@ -85,6 +85,7 @@ struct ContentView: View {
     @State private var isReportingOutage = false
     @State private var showOutageReportSheet = false
     @State private var outageReportLocation: CLLocationCoordinate2D?
+    @State private var outageReports: [OutageReport] = []
     @State private var carrierFilterOptions: [String] = []
     @State private var activeCirclesRequestID = UUID()
 
@@ -177,6 +178,7 @@ struct ContentView: View {
                     isReportingOutage = false
                     showOutageReportSheet = true
                 },
+                outageReports: outageReports,
                 recenterMap: $recenterMap
             )
             .ignoresSafeArea(edges: .bottom)
@@ -217,7 +219,9 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showOutageReportSheet) {
             if let outageReportLocation {
-                OutageReportSheet(location: outageReportLocation)
+                OutageReportSheet(location: outageReportLocation) {
+                    loadOutageReports()
+                }
                     .preferredColorScheme(.dark)
             }
         }
@@ -851,6 +855,8 @@ struct ContentView: View {
     private func loadCircles() {
         guard isLoggedIn else { return }
 
+        loadOutageReports()
+
         let requestID = UUID()
         activeCirclesRequestID = requestID
 
@@ -895,6 +901,25 @@ struct ContentView: View {
 
                 let mergedEntries = SignalCircleCache.store(newEntries: fetched)
                 circles = mergedEntries.map { $0.toSignalCircle() }
+            }
+        }
+    }
+
+    private func loadOutageReports() {
+        guard let url = URL(string: "https://api.kalculator.lol/routes") else { return }
+
+        NetworkClient.shared.get(
+            url: url,
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            as: [OutageReport].self
+        ) { fetched, error in
+            DispatchQueue.main.async {
+                if let error {
+                    print("Failed to load outage reports: \(error)")
+                    return
+                }
+                guard let fetched else { return }
+                outageReports = fetched
             }
         }
     }
@@ -1200,6 +1225,7 @@ private struct OutageReportSheet: View {
     @AppStorage("userPassword") private var password: String = ""
 
     let location: CLLocationCoordinate2D
+    let onReported: () -> Void
 
     @State private var message = ""
     @State private var locationAddress = "Looking up address…"
@@ -1308,6 +1334,9 @@ private struct OutageReportSheet: View {
                 reportSucceeded = error == nil
                 resultTitle = error == nil ? "Report sent" : "Report not sent"
                 resultMessage = error?.localizedDescription ?? "Thanks for reporting this outage."
+                if error == nil {
+                    onReported()
+                }
                 showResultAlert = true
             }
         }
