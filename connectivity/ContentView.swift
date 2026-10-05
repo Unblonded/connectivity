@@ -345,6 +345,11 @@ struct ContentView: View {
             headerMenuItem(title: "Settings", systemName: "gearshape") {
                 showSettings = true
             }
+
+            headerMenuItem(title: "Support", systemName: "questionmark.circle") {
+                guard let url = URL(string: "https://api.kalculator.lol/support") else { return }
+                UIApplication.shared.open(url)
+            }
         }
         .padding(.vertical, 8)
         .frame(width: 190)
