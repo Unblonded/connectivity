@@ -70,6 +70,7 @@ struct ContentView: View {
     @State private var routeStartAddress = ""
     @State private var routeDestinationAddress = ""
     @State private var routeErrorMessage: String?
+    @State private var routeSummary: String?
     @State private var isResolvingRoute = false
     @State private var lastLocation: CLLocation?
     @State private var currentAddress = "Finding address..."
@@ -92,6 +93,7 @@ struct ContentView: View {
     @AppStorage("isLoggedIn") private var isLoggedIn: Bool = false
     @AppStorage("hasRegisteredBefore") private var hasRegisteredBefore: Bool = false
     @AppStorage("userName") private var userName: String = ""
+    @AppStorage("userCarrier") private var userCarrier: String = ""
     @AppStorage("mapCarrierFilter") private var carrierFilter: String = "All"
     
     @AppStorage("viewOnlyMode") private var viewOnlyMode: Bool = false
@@ -237,99 +239,119 @@ struct ContentView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .top, spacing: 10) {
+        GeometryReader { geometry in
+            let buttonHeight: CGFloat = 36
+            let buttonWidth = buttonHeight
+            let carrierLabelWidth = min(120, max(32, geometry.size.width - 300))
+
+            headerToolbar(
+                buttonHeight: buttonHeight,
+                buttonWidth: buttonWidth,
+                carrierLabelWidth: carrierLabelWidth
+            )
+                .padding(.horizontal, 7)
+                .padding(.top, 4)
+                .frame(height: buttonHeight + 4, alignment: .top)
+        }
+        .frame(height: 48)
+        .background(AppTheme.bg)
+    }
+
+    private func headerToolbar(
+        buttonHeight: CGFloat,
+        buttonWidth: CGFloat,
+        carrierLabelWidth: CGFloat
+    ) -> some View {
+        HStack(spacing: 4) {
             Button {
                 showRouteBuilderPage = true
             } label: {
-                HStack(alignment: .top, spacing: 10) {
-                    Circle()
-                        .fill(Color(red: 0.016, green: 0.165, blue: 0.227))
-                        .frame(width: 30, height: 30)
-                        .overlay(
-                            Image(systemName: "antenna.radiowaves.left.and.right")
-                                .foregroundStyle(AppTheme.accent)
-                                .font(.system(size: 12))
-                        )
-                        .padding(.top, 2)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Connectivity")
-                            .font(.headline)
-                            .lineLimit(1)
-                        Text(userName.isEmpty ? "Find and avoid low-signal areas" : "Open route builder")
-                            .font(.caption2)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                            .foregroundStyle(AppTheme.muted)
-                    }
-                    .padding(.top, 1)
-                }
+                Label("Route", systemImage: "point.topleft.down.curvedto.point.bottomright.up")
+                    .font(.system(size: 10, weight: .bold))
+                    .lineLimit(1)
+                    .padding(.horizontal, 7)
+                    .frame(width: 88, height: buttonHeight)
+                    .foregroundStyle(AppTheme.accent)
+                    .background(AppTheme.accent.opacity(0.12), in: Capsule())
+                    .overlay(Capsule().stroke(AppTheme.accent.opacity(0.2), lineWidth: 1))
             }
             .buttonStyle(.plain)
-            
-            Spacer(minLength: 8)
+            .accessibilityLabel("Open route planner")
 
-            HStack(spacing: 9) {
-                Menu {
-                    carrierMenuButton(title: "All", value: "All")
-                    ForEach(carrierFilterOptions, id: \.self) { carrier in
-                        carrierMenuButton(title: carrier, value: carrier)
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "square.3.layers.3d")
-                            .font(.system(size: 16, weight: .semibold))
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 8, weight: .bold))
-                    }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 8)
-                    .background(Color.white.opacity(0.08), in: Capsule())
-                }
-                .accessibilityLabel("Carrier map layer: \(carrierFilter)")
-                .onChange(of: carrierFilter) { _, _ in
-                    loadCircles()
-                }
+            Spacer(minLength: 4)
 
-                headerButton(systemName: "exclamationmark.triangle") {
-                    isReportingOutage = true
-                    showHeaderMenu = false
+            HStack(spacing: 4) {
+            Menu {
+                carrierMenuButton(title: "All", value: "All")
+                ForEach(carrierFilterOptions, id: \.self) { carrier in
+                    carrierMenuButton(title: carrier, value: carrier)
                 }
-                .accessibilityLabel("Report an outage")
-
-                headerButton(systemName: "line.3.horizontal") {
-                    showHeaderMenu.toggle()
+            } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: "square.3.layers.3d")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text(carrierFilter == "All" ? "All carriers" : carrierFilter)
+                        .font(.system(size: 9, weight: .semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.65)
+                        .frame(width: carrierLabelWidth, alignment: .leading)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 7, weight: .bold))
                 }
-
-                headerButton(systemName: "location.fill") {
-                    recenterMap = true
-                }
-
-                Divider()
-                    .frame(height: 18)
-                    .overlay(AppTheme.muted.opacity(0.4))
-
-                headerButton(systemName: "rectangle.portrait.and.arrow.right") {
-                    logout()
-                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 5)
+                .frame(width: carrierLabelWidth + 36, height: buttonHeight - 4)
+                .background(Color.white.opacity(0.07), in: Capsule())
             }
-            .padding(.top, 5)
+            .accessibilityLabel("Carrier map layer: \(carrierFilter)")
+            .onChange(of: carrierFilter) { _, _ in
+                loadCircles()
+            }
+
+            headerButton(systemName: "exclamationmark.triangle", size: buttonHeight, width: buttonWidth) {
+                isReportingOutage = true
+                showHeaderMenu = false
+            }
+            .accessibilityLabel("Report an outage")
+
+            headerButton(systemName: "line.3.horizontal", size: buttonHeight, width: buttonWidth) {
+                showHeaderMenu.toggle()
+            }
+
+            Menu {
+                Section("Signed in") {
+                    Label(userName.isEmpty ? "Unknown account" : userName, systemImage: "person.fill")
+                    if !userCarrier.isEmpty {
+                        Label(userCarrier, systemImage: "antenna.radiowaves.left.and.right")
+                    }
+                }
+                Button {
+                    showSettings = true
+                } label: {
+                    Label("Account settings", systemImage: "gearshape")
+                }
+                Button(role: .destructive) {
+                    logout()
+                } label: {
+                    Label("Log out", systemImage: "rectangle.portrait.and.arrow.right")
+                }
+            } label: {
+                headerIconLabel(systemName: "person.crop.circle", size: buttonHeight, width: buttonWidth)
+            }
+            .accessibilityLabel("Account: \(userName)")
+            }
         }
-        .padding(.horizontal)
-        .padding(.top, 10)
-        .padding(.bottom, 8)
-        .background(.ultraThinMaterial)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(Color.white.opacity(0.08))
-                .frame(height: 1)
-        }
+        .frame(maxWidth: .infinity)
     }
 
     private var headerMenuOverlay: some View {
         VStack(alignment: .leading, spacing: 0) {
             headerMenuItem(title: "Refresh", systemName: "arrow.clockwise") {
                 loadCircles()
+            }
+
+            headerMenuItem(title: "Recenter map", systemName: "location.fill") {
+                recenterMap = true
             }
 
             headerMenuItem(title: "Info", systemName: "info.circle") {
@@ -401,14 +423,23 @@ struct ContentView: View {
         .buttonStyle(.plain)
     }
 
-    private func headerButton(systemName: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .foregroundStyle(AppTheme.accent)
-                .font(.system(size: 16, weight: .semibold))
-                .frame(width: 22, height: 22)
-        }
+    private func headerButton(
+        systemName: String,
+        size: CGFloat = 32,
+        width: CGFloat? = nil,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) { headerIconLabel(systemName: systemName, size: size, width: width) }
         .buttonStyle(.plain)
+    }
+
+    private func headerIconLabel(systemName: String, size: CGFloat = 32, width: CGFloat? = nil) -> some View {
+        let buttonWidth = width ?? size
+        return Image(systemName: systemName)
+            .foregroundStyle(AppTheme.accent)
+            .font(.system(size: size * 0.42, weight: .semibold))
+            .frame(width: buttonWidth, height: size)
+            .background(Color.white.opacity(0.07), in: Circle())
     }
 
     private var routeBuilderPage: some View {
@@ -442,18 +473,20 @@ struct ContentView: View {
                 showRouteBuilderPage = false
             } label: {
                 Image(systemName: "chevron.left")
-                    .font(.system(size: 17, weight: .semibold))
-                    .frame(width: 34, height: 34)
+                    .font(.system(size: 15, weight: .bold))
+                    .frame(width: 38, height: 38)
+                    .background(Color.white.opacity(0.08), in: Circle())
             }
             .buttonStyle(.plain)
-            .foregroundStyle(AppTheme.accent)
+            .foregroundStyle(.white)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("Route Builder")
-                    .font(.headline)
-                Text("Search an address, place, or route from your location.")
-                    .font(.caption2)
+                Text("ROUTE PLANNER")
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .tracking(1.2)
                     .foregroundStyle(AppTheme.muted)
+                Text("Plan your drive")
+                    .font(.headline.weight(.semibold))
             }
 
             Spacer()
@@ -474,69 +507,167 @@ struct ContentView: View {
     }
 
     private var routeBuilderControls: some View {
-        VStack(spacing: 12) {
-            Picker("Start", selection: $routeStartMode) {
-                ForEach(RouteStartMode.allCases) { mode in
-                    Text(mode.label).tag(mode)
+        VStack(alignment: .leading, spacing: 16) {
+            Capsule()
+                .fill(Color.white.opacity(0.28))
+                .frame(width: 34, height: 4)
+                .frame(maxWidth: .infinity)
+
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Build a route")
+                        .font(.title3.weight(.bold))
+                    Text("Find a path with better signal")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.muted)
                 }
+
+                Spacer()
+
+                if routeStartPointExists || !routeDestinationAddress.isEmpty || !routeCoordinates.isEmpty {
+                    Button("Clear") { clearRouteBuilder() }
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AppTheme.accent)
+                }
+            }
+
+            Picker("Starting point", selection: $routeStartMode) {
+                Text("My location").tag(RouteStartMode.currentLocation)
+                Text("Address").tag(RouteStartMode.customAddress)
             }
             .pickerStyle(.segmented)
 
-            if routeStartMode == .customAddress {
-                routeTextField(title: "Start", placeholder: "Start address or place", text: $routeStartAddress)
+            VStack(spacing: 0) {
+                HStack(spacing: 12) {
+                    Image(systemName: routeStartMode == .currentLocation ? "location.fill" : "circle")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Color.green.opacity(0.9))
+                        .frame(width: 22)
+
+                    if routeStartMode == .currentLocation {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("START")
+                                .font(.system(size: 9, weight: .bold))
+                                .tracking(0.8)
+                                .foregroundStyle(AppTheme.muted)
+                            Text("Current location")
+                                .font(.subheadline.weight(.medium))
+                        }
+                        Spacer()
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(AppTheme.accent)
+                    } else {
+                        TextField("Starting point", text: $routeStartAddress)
+                            .textInputAutocapitalization(.words)
+                            .autocorrectionDisabled(false)
+                            .submitLabel(.next)
+                            .foregroundStyle(.white)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+
+                HStack(spacing: 12) {
+                    VStack(spacing: 0) {
+                        Circle().fill(Color.white.opacity(0.22)).frame(width: 3, height: 3)
+                        Rectangle().fill(Color.white.opacity(0.18)).frame(width: 1, height: 16)
+                        Circle().fill(Color.white.opacity(0.22)).frame(width: 3, height: 3)
+                    }
+                    .frame(width: 22)
+
+                    Rectangle()
+                        .fill(Color.white.opacity(0.08))
+                        .frame(height: 1)
+                }
+                .padding(.horizontal, 14)
+
+                HStack(spacing: 12) {
+                    Image(systemName: "mappin.and.ellipse")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Color.orange)
+                        .frame(width: 22)
+                    TextField("Where to?", text: $routeDestinationAddress)
+                        .textInputAutocapitalization(.words)
+                        .autocorrectionDisabled(false)
+                        .submitLabel(.route)
+                        .onSubmit(generateRoute)
+                        .foregroundStyle(.white)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+            }
+            .background(AppTheme.bg.opacity(0.78), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
             }
 
-            routeTextField(title: "Destination", placeholder: "Destination address or place", text: $routeDestinationAddress)
-
             if let routeErrorMessage {
-                Text(routeErrorMessage)
+                Label(routeErrorMessage, systemImage: "exclamationmark.circle.fill")
                     .font(.caption)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(.red.opacity(0.95))
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            HStack(spacing: 10) {
-                Button {
-                    generateRoute()
-                } label: {
+            if let routeSummary, canStartGuidance {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(Color.green)
+                    Text(routeSummary)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.white)
+                    Spacer(minLength: 0)
+                }
+            }
+
+            Button {
+                generateRoute()
+            } label: {
+                HStack(spacing: 9) {
                     if isResolvingRoute {
-                        ProgressView()
-                            .tint(.white)
-                            .frame(maxWidth: .infinity)
+                        ProgressView().tint(.white)
+                        Text("Finding best route…")
                     } else {
-                        Label("Route", systemImage: "point.topleft.down.curvedto.point.bottomright.up")
-                            .frame(maxWidth: .infinity)
+                        Image(systemName: "point.topleft.down.curvedto.point.bottomright.up")
+                        Text(routeSummary == nil ? "Find best route" : "Recalculate route")
                     }
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(!canGenerateRoute)
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+                .frame(height: 52)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(AppTheme.accent.opacity(0.88))
+            .disabled(!canGenerateRoute)
 
+            if canStartGuidance {
                 Button {
                     startGuidance()
                 } label: {
-                    Label("Guide", systemImage: "location.north.line")
+                    Label("Start navigation", systemImage: "arrow.up.right")
+                        .font(.subheadline.weight(.semibold))
                         .frame(maxWidth: .infinity)
+                        .frame(height: 42)
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(!canStartGuidance)
-
-                Button {
-                    clearRouteBuilder()
-                } label: {
-                    Label("Clear", systemImage: "trash")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
+                .buttonStyle(.plain)
+                .foregroundStyle(AppTheme.accent)
             }
-
         }
-        .padding(14)
-        .background(.ultraThinMaterial)
+        .padding(.horizontal, 18)
+        .padding(.top, 11)
+        .padding(.bottom, 14)
+        .background(.ultraThinMaterial, in: UnevenRoundedRectangle(topLeadingRadius: 24, topTrailingRadius: 24))
         .overlay(alignment: .top) {
-            Rectangle()
-                .fill(Color.white.opacity(0.08))
-                .frame(height: 1)
+            UnevenRoundedRectangle(topLeadingRadius: 24, topTrailingRadius: 24)
+                .stroke(Color.white.opacity(0.1), lineWidth: 1)
         }
+        .shadow(color: .black.opacity(0.24), radius: 24, y: -8)
+        .padding(.horizontal, 10)
+        .padding(.bottom, 6)
+    }
+
+    private var routeStartPointExists: Bool {
+        startPoint != nil || !routeStartAddress.isEmpty
     }
 
     private var canGenerateRoute: Bool {
@@ -553,26 +684,6 @@ struct ContentView: View {
     private var canStartGuidance: Bool {
         startPoint != nil && endPoint != nil && routeCoordinates.count > 1 && !isResolvingRoute
     }
-
-    private func routeTextField(title: String, placeholder: String, text: Binding<String>) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(AppTheme.muted)
-
-            TextField(placeholder, text: text)
-                .textInputAutocapitalization(.words)
-                .autocorrectionDisabled(false)
-                .submitLabel(.route)
-                .onSubmit(generateRoute)
-                .foregroundStyle(.white)
-                .tint(AppTheme.accent)
-                .padding(12)
-                .background(Color.white.opacity(0.06))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-        }
-    }
-
 
     private func legendRow(color: Color, label: String) -> some View {
         HStack {
@@ -624,6 +735,7 @@ struct ContentView: View {
 
         isResolvingRoute = true
         routeErrorMessage = nil
+        routeSummary = nil
         routeCoordinates = []
 
         switch routeStartMode {
@@ -728,6 +840,7 @@ struct ContentView: View {
 
             print("Chose: \(best.name) — signal score: \(String(format: "%.1f", best.signalScore)) — ETA: \(Int(best.travelTime / 60))min — data waypoint: \(best.usesDataWaypoint)")
             routeCoordinates = best.coordinates
+            routeSummary = "\(Int(best.travelTime / 60)) min · Signal score \(Int(best.signalScore.rounded()))"
             isResolvingRoute = false
         }
     }
@@ -828,6 +941,7 @@ struct ContentView: View {
         startPoint = nil
         endPoint = nil
         routeCoordinates = []
+        routeSummary = nil
         routeStartAddress = ""
         routeDestinationAddress = ""
         routeErrorMessage = nil
