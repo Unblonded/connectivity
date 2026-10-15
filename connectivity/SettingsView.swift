@@ -168,128 +168,25 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Download test") {
-                    Picker("File size", selection: downloadTestSize) {
-                        ForEach(DownloadTestSize.allCases) { size in
-                            Text(size.label).tag(size)
-                        }
-                    }
-                    Text("Larger files give more accurate results on fast connections but take longer and use more data.")
-                        .font(.footnote)
-                        .foregroundStyle(AppTheme.muted)
-                }
+            ZStack {
+                AuroraBackground()
 
-                Section("Upload test") {
-                    Picker("Payload size", selection: uploadPayloadSize) {
-                        ForEach(UploadPayloadSize.allCases) { size in
-                            Text(size.label).tag(size)
-                        }
+                ScrollView {
+                    VStack(spacing: 14) {
+                        accountHeaderCard
+                        viewingCard
+                        testingCard
+                        mapCard
+                        cacheCard
+                        accountCard
+                        deviceCard
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 6)
+                    .padding(.bottom, 36)
                 }
-                
-                Section("Test frequency") {
-                    Picker("Run speed test every", selection: speedTestInterval) {
-                        ForEach(SpeedTestInterval.allCases) { interval in
-                            Text(interval.label).tag(interval)
-                        }
-                    }
-                    Text("More frequent tests give a denser map but use more data.")
-                        .font(.footnote)
-                        .foregroundStyle(AppTheme.muted)
-                }
-                
-                Section("Viewing Options") {
-                    Toggle("View only mode", isOn: $viewOnlyMode)
-                    Text("When enabled, the app shows the connectivity map without running speed tests or submitting your data.")
-                        .font(.footnote)
-                        .foregroundStyle(AppTheme.muted)
-
-                    Picker("Data Display", selection: signalDataDisplayMode) {
-                        ForEach(SignalDataDisplayMode.allCases) { mode in
-                            Text(mode.label).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                }
-                
-                Section("Map refresh") {
-                    Picker("Refresh map every", selection: mapRefreshInterval) {
-                        ForEach(MapRefreshInterval.allCases) { interval in
-                            Text(interval.label).tag(interval)
-                        }
-                    }
-                }
-
-                Section("Map data cache") {
-                    HStack {
-                        Text("Cached points")
-                        Spacer()
-                        Text("\(cacheSnapshot.entryCount)")
-                            .foregroundStyle(AppTheme.muted)
-                    }
-
-                    HStack {
-                        Text("Data size")
-                        Spacer()
-                        Text(cacheSnapshot.formattedByteCount)
-                            .foregroundStyle(AppTheme.muted)
-                    }
-
-                    Button("Clear cached map data", role: .destructive) {
-                        showClearCacheConfirmation = true
-                    }
-                    .disabled(cacheSnapshot.entryCount == 0)
-                }
-
-                Section("Account Management") {
-                    Picker("Carrier", selection: $selectedNewCarrier) {
-                        if userCarrier.isEmpty {
-                            Text("Not set").tag("")
-                        }
-                        ForEach(carrierOptions, id: \.self) { carrier in
-                            Text(carrier).tag(carrier)
-                        }
-                    }
-                    .disabled(availableCarriers.isEmpty || isChangingCarrier || userName.isEmpty)
-                    .onChange(of: selectedNewCarrier) { _, newCarrier in
-                        guard !newCarrier.isEmpty, newCarrier != userCarrier else { return }
-                        changeCarrier(to: newCarrier)
-                    }
-
-                    Button {
-                        newPassword = ""
-                        showResetPasswordPrompt = true
-                    } label: {
-                        if isResettingPassword {
-                            ProgressView()
-                        } else {
-                            Text("Reset Password")
-                        }
-                    }
-                    .disabled(isResettingPassword || userName.isEmpty)
-
-                    Button(role: .destructive) {
-                        showDeleteAccountConfirmation = true
-                    } label: {
-                        if isDeletingAccount {
-                            ProgressView()
-                        } else {
-                            Text("Delete Account")
-                        }
-                    }
-                    .disabled(isDeletingAccount || userName.isEmpty || userPassword.isEmpty)
-                }
-                
-                Section("Display Idle Timeout") {
-                    Toggle("Keep screen awake", isOn: $keepScreenAwake)
-                    Text("Prevents your device from locking while the app is open. Uses more battery.")
-                        .font(.footnote)
-                        .foregroundStyle(AppTheme.muted)
-                }
+                .scrollBounceBehavior(.basedOnSize)
             }
-            .scrollContentBackground(.hidden)
-            .background(AppTheme.bg)
             .foregroundStyle(.white)
             .tint(AppTheme.accent)
             .navigationTitle("Settings")
@@ -297,6 +194,7 @@ struct SettingsView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Done") { dismiss() }
+                        .font(.ds(15, .bold))
                 }
             }
             .onAppear {
@@ -340,6 +238,240 @@ struct SettingsView: View {
                 Text("This permanently deletes your account. You will be signed out and need to register again to use this account.")
             }
         }
+    }
+
+    // MARK: - Cards
+
+    private var accountHeaderCard: some View {
+        HStack(spacing: 14) {
+            ZStack {
+                Circle()
+                    .fill(AppTheme.accentGradient)
+                    .frame(width: 54, height: 54)
+                    .blur(radius: 13)
+                    .opacity(0.55)
+
+                Text(userInitial)
+                    .font(.ds(21, .bold))
+                    .foregroundStyle(AppTheme.accent)
+                    .frame(width: 54, height: 54)
+                    .glassEffect(.regular, in: Circle())
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(userName.isEmpty ? "Not signed in" : userName)
+                    .font(.ds(18, .bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+
+                HStack(spacing: 6) {
+                    if !userCarrier.isEmpty {
+                        GlassBadge(text: userCarrier, systemImage: "antenna.radiowaves.left.and.right")
+                    }
+
+                    GlassBadge(
+                        text: viewOnlyMode ? "View only" : "Contributing",
+                        systemImage: viewOnlyMode ? "eye.fill" : "dot.radiowaves.up.forward",
+                        tint: viewOnlyMode ? AppTheme.muted : AppTheme.good
+                    )
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .strokeBorder(AppTheme.hairline, lineWidth: 1)
+        }
+    }
+
+    private var viewingCard: some View {
+        GlassCard(title: "Viewing", systemImage: "eye.fill") {
+            VStack(spacing: 0) {
+                GlassToggleRow(title: "View only mode", systemImage: "eye", isOn: $viewOnlyMode)
+
+                GlassNote("Shows the connectivity map without running speed tests or submitting your data.")
+
+                GlassDivider()
+
+                VStack(alignment: .leading, spacing: 11) {
+                    HStack(spacing: 11) {
+                        Image(systemName: "circle.grid.2x2.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(AppTheme.accent)
+                            .frame(width: 20)
+
+                        Text("Data display")
+                            .font(.ds(15, .medium))
+                            .foregroundStyle(.white)
+
+                        Spacer(minLength: 0)
+                    }
+
+                    GlassSegmented(
+                        options: SignalDataDisplayMode.allCases.map { (label: $0.label, value: $0) },
+                        selection: signalDataDisplayMode
+                    )
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 14)
+                .padding(.bottom, 16)
+            }
+        }
+    }
+
+    private var testingCard: some View {
+        GlassCard(title: "Speed testing", systemImage: "speedometer") {
+            VStack(spacing: 0) {
+                GlassMenuRow(
+                    title: "Test interval",
+                    systemImage: "timer",
+                    options: SpeedTestInterval.allCases.map { (label: $0.label, value: $0) },
+                    selection: speedTestInterval
+                )
+
+                GlassDivider()
+
+                GlassMenuRow(
+                    title: "Download size",
+                    systemImage: "arrow.down.circle",
+                    options: DownloadTestSize.allCases.map { (label: $0.label, value: $0) },
+                    selection: downloadTestSize
+                )
+
+                GlassDivider()
+
+                GlassMenuRow(
+                    title: "Upload payload",
+                    systemImage: "arrow.up.circle",
+                    options: UploadPayloadSize.allCases.map { (label: $0.label, value: $0) },
+                    selection: uploadPayloadSize
+                )
+
+                GlassNote("Larger files and more frequent tests give a denser, more accurate map but use more data.")
+            }
+        }
+    }
+
+    private var mapCard: some View {
+        GlassCard(title: "Map", systemImage: "map.fill") {
+            VStack(spacing: 0) {
+                GlassMenuRow(
+                    title: "Auto refresh",
+                    systemImage: "arrow.clockwise",
+                    options: MapRefreshInterval.allCases.map { (label: $0.label, value: $0) },
+                    selection: mapRefreshInterval
+                )
+
+                GlassNote("How often the map pulls new points from the server.")
+            }
+        }
+    }
+
+    private var cacheCard: some View {
+        GlassCard(title: "Offline cache", systemImage: "internaldrive.fill") {
+            VStack(spacing: 0) {
+                GlassStatRow(
+                    title: "Cached points",
+                    value: "\(cacheSnapshot.entryCount)",
+                    systemImage: "mappin.circle"
+                )
+
+                GlassDivider()
+
+                GlassStatRow(
+                    title: "Data size",
+                    value: cacheSnapshot.formattedByteCount,
+                    systemImage: "shippingbox"
+                )
+
+                GlassDivider()
+
+                GlassActionRow(
+                    title: "Clear cached map data",
+                    systemImage: "trash",
+                    tint: AppTheme.bad,
+                    isEnabled: cacheSnapshot.entryCount > 0
+                ) {
+                    showClearCacheConfirmation = true
+                }
+            }
+            .padding(.bottom, 4)
+        }
+    }
+
+    private var accountCard: some View {
+        GlassCard(title: "Account", systemImage: "person.crop.circle.fill") {
+            VStack(spacing: 0) {
+                GlassMenuRow(
+                    title: "Carrier",
+                    systemImage: "antenna.radiowaves.left.and.right",
+                    options: carrierMenuOptions,
+                    selection: $selectedNewCarrier,
+                    isEnabled: !availableCarriers.isEmpty && !isChangingCarrier && !userName.isEmpty
+                )
+                .onChange(of: selectedNewCarrier) { _, newCarrier in
+                    guard !newCarrier.isEmpty, newCarrier != userCarrier else { return }
+                    changeCarrier(to: newCarrier)
+                }
+
+                GlassDivider()
+
+                GlassActionRow(
+                    title: "Reset password",
+                    systemImage: "key.fill",
+                    isBusy: isResettingPassword,
+                    isEnabled: !userName.isEmpty
+                ) {
+                    newPassword = ""
+                    showResetPasswordPrompt = true
+                }
+
+                GlassDivider()
+
+                GlassActionRow(
+                    title: "Delete account",
+                    systemImage: "person.crop.circle.badge.xmark",
+                    tint: AppTheme.bad,
+                    isBusy: isDeletingAccount,
+                    isEnabled: !userName.isEmpty && !userPassword.isEmpty
+                ) {
+                    showDeleteAccountConfirmation = true
+                }
+            }
+            .padding(.bottom, 4)
+        }
+    }
+
+    private var deviceCard: some View {
+        GlassCard(title: "Device", systemImage: "iphone") {
+            VStack(spacing: 0) {
+                GlassToggleRow(title: "Keep screen awake", systemImage: "sun.max.fill", isOn: $keepScreenAwake)
+
+                GlassNote("Prevents your device from locking while the app is open. Uses more battery.")
+            }
+        }
+    }
+
+    private var userInitial: String {
+        let trimmed = userName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let first = trimmed.first else { return "?" }
+        return String(first).uppercased()
+    }
+
+    /// Carrier choices for the account picker, including a placeholder when the
+    /// user has not set one yet.
+    private var carrierMenuOptions: [(label: String, value: String)] {
+        var options: [(label: String, value: String)] = []
+        if userCarrier.isEmpty {
+            options.append((label: "Not set", value: ""))
+        }
+        options.append(contentsOf: carrierOptions.map { (label: $0, value: $0) })
+        return options
     }
 
     private func refreshCacheSnapshot() {

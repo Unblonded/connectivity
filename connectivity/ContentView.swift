@@ -90,6 +90,8 @@ struct ContentView: View {
     @State private var carrierFilterOptions: [String] = []
     @State private var activeCirclesRequestID = UUID()
 
+    @Namespace private var glassNamespace
+
     @AppStorage("isLoggedIn") private var isLoggedIn: Bool = false
     @AppStorage("hasRegisteredBefore") private var hasRegisteredBefore: Bool = false
     @AppStorage("userName") private var userName: String = ""
@@ -181,35 +183,51 @@ struct ContentView: View {
                     showOutageReportSheet = true
                 },
                 outageReports: outageReports,
+                bottomChromeInset: 86,
                 recenterMap: $recenterMap
             )
-            .ignoresSafeArea(edges: .bottom)
+            .ignoresSafeArea()
+
+            // Vignette so the floating glass chrome stays legible over any map tile.
+            VStack(spacing: 0) {
+                LinearGradient(
+                    colors: [Color.black.opacity(0.5), .clear],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 190)
+
+                Spacer(minLength: 0)
+
+                LinearGradient(
+                    colors: [.clear, Color.black.opacity(0.45)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 160)
+            }
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+
+            // Tap-anywhere-to-close layer for the chrome menu, below the chrome itself.
+            if showHeaderMenu {
+                Color.white.opacity(0.001)
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
+                            showHeaderMenu = false
+                        }
+                    }
+            }
 
             VStack(spacing: 0) {
-                header
-                if isReportingOutage {
-                    HStack(spacing: 8) {
-                        Text("Tap the map where the outage is happening")
-                            .font(.caption.weight(.medium))
-                        Spacer(minLength: 4)
-                        Button("Cancel") { isReportingOutage = false }
-                            .font(.caption.weight(.semibold))
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 9)
-                    .background(.ultraThinMaterial)
-                }
-                Spacer()
+                topChrome
+                Spacer(minLength: 0)
+                statusHUD
             }
-
-            if showHeaderMenu {
-                headerMenuOverlay
-            }
-
-            VStack {
-                Spacer()
-                userInfoPill
-            }
+            .padding(.horizontal, 14)
+            .padding(.bottom, 12)
+            .zIndex(1)
 
             if showLegend {
                 legendOverlay
@@ -238,153 +256,242 @@ struct ContentView: View {
         .foregroundStyle(.white)
     }
 
-    private var header: some View {
-        GeometryReader { geometry in
-            let buttonHeight: CGFloat = 36
-            let buttonWidth = buttonHeight
-            let carrierLabelWidth = min(120, max(32, geometry.size.width - 300))
+    /// Floating top chrome. Everything lives in one `GlassEffectContainer` so the
+    /// separate glass capsules blend into each other as they come close.
+    private var topChrome: some View {
+        // spacing 0: the pills are independent controls and should not blend
+        // into each other. The container is here for the menu's morph.
+        GlassEffectContainer(spacing: 0) {
+            VStack(alignment: .trailing, spacing: 10) {
+                HStack(spacing: 10) {
+                    routePillButton
+                    Spacer(minLength: 6)
+                    chromeCluster
+                }
 
-            headerToolbar(
-                buttonHeight: buttonHeight,
-                buttonWidth: buttonWidth,
-                carrierLabelWidth: carrierLabelWidth
-            )
-                .padding(.horizontal, 7)
-                .padding(.top, 4)
-                .frame(height: buttonHeight + 4, alignment: .top)
+                HStack(spacing: 10) {
+                    carrierFilterPill
+                    Spacer(minLength: 0)
+                }
+
+                if showHeaderMenu {
+                    headerMenuPanel
+                        .glassEffectID("chromeMenu", in: glassNamespace)
+                        .glassEffectTransition(.matchedGeometry)
+                        .transition(.scale(scale: 0.9, anchor: .topTrailing).combined(with: .opacity))
+                }
+
+                if isReportingOutage {
+                    outageTargetingBanner
+                }
+            }
         }
-        .frame(height: 48)
-        .background(AppTheme.bg)
+        .padding(.top, 4)
     }
 
-    private func headerToolbar(
-        buttonHeight: CGFloat,
-        buttonWidth: CGFloat,
-        carrierLabelWidth: CGFloat
-    ) -> some View {
-        HStack(spacing: 4) {
-            Button {
-                showRouteBuilderPage = true
-            } label: {
-                Label("Route", systemImage: "point.topleft.down.curvedto.point.bottomright.up")
-                    .font(.system(size: 10, weight: .bold))
-                    .lineLimit(1)
-                    .padding(.horizontal, 7)
-                    .frame(width: 88, height: buttonHeight)
-                    .foregroundStyle(AppTheme.accent)
-                    .background(AppTheme.accent.opacity(0.12), in: Capsule())
-                    .overlay(Capsule().stroke(AppTheme.accent.opacity(0.2), lineWidth: 1))
+    private var routePillButton: some View {
+        Button {
+            showRouteBuilderPage = true
+        } label: {
+            HStack(spacing: 7) {
+                Image(systemName: "point.topleft.down.curvedto.point.bottomright.up")
+                    .font(.system(size: 13, weight: .bold))
+                Text("Route")
+                    .font(.ds(14, .bold))
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Open route planner")
+            .foregroundStyle(AppTheme.accent)
+            .padding(.horizontal, 16)
+            .frame(height: 42)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(PressScaleStyle())
+        .glassEffect(.regular.tint(AppTheme.accentDeep.opacity(0.20)).interactive(), in: Capsule())
+        .accessibilityLabel("Open route planner")
+    }
 
-            Spacer(minLength: 4)
-
-            HStack(spacing: 4) {
-            Menu {
-                carrierMenuButton(title: "All", value: "All")
-                ForEach(carrierFilterOptions, id: \.self) { carrier in
-                    carrierMenuButton(title: carrier, value: carrier)
+    /// Outage / account / menu grouped into a single glass capsule.
+    private var chromeCluster: some View {
+        HStack(spacing: 2) {
+            clusterButton(
+                systemName: "exclamationmark.triangle.fill",
+                tint: isReportingOutage ? AppTheme.warn : AppTheme.accent
+            ) {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                    isReportingOutage.toggle()
+                    showHeaderMenu = false
                 }
-            } label: {
-                HStack(spacing: 3) {
-                    Image(systemName: "square.3.layers.3d")
-                        .font(.system(size: 11, weight: .semibold))
-                    Text(carrierFilter == "All" ? "All carriers" : carrierFilter)
-                        .font(.system(size: 9, weight: .semibold))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.65)
-                        .frame(width: carrierLabelWidth, alignment: .leading)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 7, weight: .bold))
-                }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 5)
-                .frame(width: carrierLabelWidth + 36, height: buttonHeight - 4)
-                .background(Color.white.opacity(0.07), in: Capsule())
-            }
-            .accessibilityLabel("Carrier map layer: \(carrierFilter)")
-            .onChange(of: carrierFilter) { _, _ in
-                loadCircles()
-            }
-
-            headerButton(systemName: "exclamationmark.triangle", size: buttonHeight, width: buttonWidth) {
-                isReportingOutage = true
-                showHeaderMenu = false
             }
             .accessibilityLabel("Report an outage")
 
-            headerButton(systemName: "line.3.horizontal", size: buttonHeight, width: buttonWidth) {
-                showHeaderMenu.toggle()
-            }
+            accountMenu
 
-            Menu {
-                Section("Signed in") {
-                    Label(userName.isEmpty ? "Unknown account" : userName, systemImage: "person.fill")
-                    if !userCarrier.isEmpty {
-                        Label(userCarrier, systemImage: "antenna.radiowaves.left.and.right")
-                    }
+            clusterButton(
+                systemName: showHeaderMenu ? "xmark" : "line.3.horizontal",
+                tint: AppTheme.accent
+            ) {
+                withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
+                    showHeaderMenu.toggle()
                 }
-                Button {
-                    showSettings = true
-                } label: {
-                    Label("Account settings", systemImage: "gearshape")
-                }
-                Button(role: .destructive) {
-                    logout()
-                } label: {
-                    Label("Log out", systemImage: "rectangle.portrait.and.arrow.right")
-                }
-            } label: {
-                headerIconLabel(systemName: "person.crop.circle", size: buttonHeight, width: buttonWidth)
             }
-            .accessibilityLabel("Account: \(userName)")
-            }
+            .accessibilityLabel("More options")
         }
-        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 4)
+        .frame(height: 42)
+        .glassEffect(.regular, in: Capsule())
     }
 
-    private var headerMenuOverlay: some View {
+    private func clusterButton(
+        systemName: String,
+        tint: Color,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 36, height: 36)
+                .contentShape(Circle())
+        }
+        .buttonStyle(PressScaleStyle())
+    }
+
+    private var accountMenu: some View {
+        Menu {
+            Section("Signed in") {
+                Label(userName.isEmpty ? "Unknown account" : userName, systemImage: "person.fill")
+                if !userCarrier.isEmpty {
+                    Label(userCarrier, systemImage: "antenna.radiowaves.left.and.right")
+                }
+            }
+            Button {
+                showSettings = true
+            } label: {
+                Label("Account settings", systemImage: "gearshape")
+            }
+            Button(role: .destructive) {
+                logout()
+            } label: {
+                Label("Log out", systemImage: "rectangle.portrait.and.arrow.right")
+            }
+        } label: {
+            Image(systemName: "person.crop.circle")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(AppTheme.accent)
+                .frame(width: 36, height: 36)
+                .contentShape(Circle())
+        }
+        .accessibilityLabel("Account: \(userName)")
+    }
+
+    private var carrierFilterPill: some View {
+        Menu {
+            carrierMenuButton(title: "All carriers", value: "All")
+            ForEach(carrierFilterOptions, id: \.self) { carrier in
+                carrierMenuButton(title: carrier, value: carrier)
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "square.3.layers.3d")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(AppTheme.accent)
+
+                Text(carrierFilter == "All" ? "All carriers" : carrierFilter)
+                    .font(.ds(13, .semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(AppTheme.muted)
+            }
+            .padding(.horizontal, 13)
+            .frame(height: 36)
+            .contentShape(Capsule())
+        }
+        .glassEffect(.regular.interactive(), in: Capsule())
+        .accessibilityLabel("Carrier map layer: \(carrierFilter)")
+        .onChange(of: carrierFilter) { _, _ in
+            loadCircles()
+        }
+    }
+
+    private var outageTargetingBanner: some View {
+        HStack(spacing: 9) {
+            Image(systemName: "hand.tap.fill")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(AppTheme.warn)
+
+            Text("Tap the map where the outage is")
+                .font(.ds(13, .medium))
+                .foregroundStyle(.white)
+
+            Spacer(minLength: 4)
+
+            Button {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                    isReportingOutage = false
+                }
+            } label: {
+                Text("Cancel")
+                    .font(.ds(13, .bold))
+                    .foregroundStyle(AppTheme.warn)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 15)
+        .padding(.vertical, 12)
+        .glassEffect(.regular.tint(AppTheme.warn.opacity(0.20)), in: Capsule())
+        .transition(.move(edge: .top).combined(with: .opacity))
+    }
+
+    private var headerMenuPanel: some View {
         VStack(alignment: .leading, spacing: 0) {
-            headerMenuItem(title: "Refresh", systemName: "arrow.clockwise") {
+            headerMenuItem(title: "Refresh data", systemName: "arrow.clockwise") {
                 loadCircles()
             }
+
+            GlassDivider(inset: 48)
 
             headerMenuItem(title: "Recenter map", systemName: "location.fill") {
                 recenterMap = true
             }
 
-            headerMenuItem(title: "Info", systemName: "info.circle") {
-                withAnimation(.easeOut(duration: 0.2)) {
+            GlassDivider(inset: 48)
+
+            headerMenuItem(title: "Scoring guide", systemName: "info.circle") {
+                withAnimation(.spring(response: 0.36, dampingFraction: 0.8)) {
                     showLegend = true
                 }
             }
 
-            headerMenuItem(title: "Leaderboard", systemName: "trophy") {
+            GlassDivider(inset: 48)
+
+            headerMenuItem(title: "Leaderboard", systemName: "trophy.fill") {
                 showLeaderboardPage = true
             }
 
-            headerMenuItem(title: "Settings", systemName: "gearshape") {
+            GlassDivider(inset: 48)
+
+            headerMenuItem(title: "Settings", systemName: "gearshape.fill") {
                 showSettings = true
             }
+
+            GlassDivider(inset: 48)
 
             headerMenuItem(title: "Support", systemName: "questionmark.circle") {
                 guard let url = URL(string: "https://api.kalculator.lol/support") else { return }
                 UIApplication.shared.open(url)
             }
         }
-        .padding(.vertical, 8)
-        .frame(width: 190)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .padding(.vertical, 5)
+        .frame(width: 232)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .strokeBorder(AppTheme.hairline, lineWidth: 1)
         }
-        .shadow(color: .black.opacity(0.25), radius: 12, y: 8)
-        .padding(.top, 56)
-        .padding(.trailing, 70)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-        .zIndex(1)
+        .shadow(color: .black.opacity(0.35), radius: 22, y: 12)
     }
 
     @ViewBuilder
@@ -402,44 +509,28 @@ struct ContentView: View {
 
     private func headerMenuItem(title: String, systemName: String, action: @escaping () -> Void) -> some View {
         Button {
-            showHeaderMenu = false
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.84)) {
+                showHeaderMenu = false
+            }
             action()
         } label: {
-            HStack(spacing: 12) {
+            HStack(spacing: 13) {
                 Image(systemName: systemName)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(AppTheme.accent)
                     .frame(width: 22)
 
                 Text(title)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.ds(15, .semibold))
                     .foregroundStyle(.white)
 
-                Spacer()
+                Spacer(minLength: 0)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
+            .padding(.horizontal, 15)
+            .padding(.vertical, 12)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-    }
-
-    private func headerButton(
-        systemName: String,
-        size: CGFloat = 32,
-        width: CGFloat? = nil,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) { headerIconLabel(systemName: systemName, size: size, width: width) }
-        .buttonStyle(.plain)
-    }
-
-    private func headerIconLabel(systemName: String, size: CGFloat = 32, width: CGFloat? = nil) -> some View {
-        let buttonWidth = width ?? size
-        return Image(systemName: systemName)
-            .foregroundStyle(AppTheme.accent)
-            .font(.system(size: size * 0.42, weight: .semibold))
-            .frame(width: buttonWidth, height: size)
-            .background(Color.white.opacity(0.07), in: Circle())
     }
 
     private var routeBuilderPage: some View {
@@ -459,66 +550,96 @@ struct ContentView: View {
             .ignoresSafeArea()
 
             VStack(spacing: 0) {
+                LinearGradient(
+                    colors: [Color.black.opacity(0.5), .clear],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 180)
+
+                Spacer(minLength: 0)
+            }
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+
+            VStack(spacing: 0) {
                 routeBuilderHeader
-                Spacer()
+                    .padding(.horizontal, 14)
+
+                Spacer(minLength: 0)
+            }
+
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
+
                 routeBuilderControls
             }
+            .ignoresSafeArea(edges: .bottom)
         }
         .foregroundStyle(.white)
     }
 
     private var routeBuilderHeader: some View {
-        HStack(spacing: 12) {
-            Button {
-                showRouteBuilderPage = false
-            } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 15, weight: .bold))
-                    .frame(width: 38, height: 38)
-                    .background(Color.white.opacity(0.08), in: Circle())
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.white)
+        GlassEffectContainer(spacing: 0) {
+            HStack(spacing: 10) {
+                Button {
+                    showRouteBuilderPage = false
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 42, height: 42)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(PressScaleStyle())
+                .glassEffect(.regular.interactive(), in: Circle())
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text("ROUTE PLANNER")
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .tracking(1.2)
-                    .foregroundStyle(AppTheme.muted)
-                Text("Plan your drive")
-                    .font(.headline.weight(.semibold))
-            }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("ROUTE PLANNER")
+                        .font(.ds(9, .bold))
+                        .tracking(1.3)
+                        .foregroundStyle(AppTheme.muted)
 
-            Spacer()
+                    Text("Plan your drive")
+                        .font(.ds(16, .bold))
+                        .foregroundStyle(.white)
+                }
+                .padding(.horizontal, 15)
+                .frame(height: 42)
+                .glassEffect(.regular, in: Capsule())
 
-            headerButton(systemName: "location.fill") {
-                recenterMap = true
+                Spacer(minLength: 0)
+
+                Button {
+                    recenterMap = true
+                } label: {
+                    Image(systemName: "location.fill")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(AppTheme.accent)
+                        .frame(width: 42, height: 42)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(PressScaleStyle())
+                .glassEffect(.regular.interactive(), in: Circle())
             }
         }
-        .padding(.horizontal)
-        .padding(.top, 10)
-        .padding(.bottom, 8)
-        .background(.ultraThinMaterial)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(Color.white.opacity(0.08))
-                .frame(height: 1)
-        }
+        .padding(.top, 4)
     }
 
     private var routeBuilderControls: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 15) {
             Capsule()
-                .fill(Color.white.opacity(0.28))
-                .frame(width: 34, height: 4)
+                .fill(Color.white.opacity(0.26))
+                .frame(width: 38, height: 4)
                 .frame(maxWidth: .infinity)
 
-            HStack(alignment: .center) {
+            HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Build a route")
-                        .font(.title3.weight(.bold))
+                        .font(.ds(21, .bold))
+
                     Text("Find a path with better signal")
-                        .font(.caption)
+                        .font(.footnote)
                         .foregroundStyle(AppTheme.muted)
                 }
 
@@ -526,98 +647,80 @@ struct ContentView: View {
 
                 if routeStartPointExists || !routeDestinationAddress.isEmpty || !routeCoordinates.isEmpty {
                     Button("Clear") { clearRouteBuilder() }
-                        .font(.subheadline.weight(.semibold))
+                        .font(.ds(14, .bold))
                         .foregroundStyle(AppTheme.accent)
+                        .buttonStyle(.plain)
                 }
             }
 
-            Picker("Starting point", selection: $routeStartMode) {
-                Text("My location").tag(RouteStartMode.currentLocation)
-                Text("Address").tag(RouteStartMode.customAddress)
-            }
-            .pickerStyle(.segmented)
+            GlassSegmented(
+                options: [
+                    (label: "My location", value: RouteStartMode.currentLocation),
+                    (label: "Address", value: RouteStartMode.customAddress)
+                ],
+                selection: $routeStartMode
+            )
 
-            VStack(spacing: 0) {
-                HStack(spacing: 12) {
-                    Image(systemName: routeStartMode == .currentLocation ? "location.fill" : "circle")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(Color.green.opacity(0.9))
-                        .frame(width: 22)
+            VStack(spacing: 9) {
+                if routeStartMode == .currentLocation {
+                    GlassField(systemImage: "location.fill", tint: AppTheme.good) {
+                        HStack(spacing: 0) {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("START")
+                                    .font(.ds(9, .bold))
+                                    .tracking(0.9)
+                                    .foregroundStyle(AppTheme.muted)
 
-                    if routeStartMode == .currentLocation {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("START")
-                                .font(.system(size: 9, weight: .bold))
-                                .tracking(0.8)
-                                .foregroundStyle(AppTheme.muted)
-                            Text("Current location")
-                                .font(.subheadline.weight(.medium))
+                                Text("Current location")
+                                    .font(.ds(15, .medium))
+                                    .foregroundStyle(.white)
+                            }
+
+                            Spacer(minLength: 0)
+
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(AppTheme.accent)
                         }
-                        Spacer()
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(AppTheme.accent)
-                    } else {
+                    }
+                } else {
+                    GlassField(systemImage: "circle.circle.fill", tint: AppTheme.good) {
                         TextField("Starting point", text: $routeStartAddress)
                             .textInputAutocapitalization(.words)
                             .autocorrectionDisabled(false)
                             .submitLabel(.next)
-                            .foregroundStyle(.white)
                     }
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
 
-                HStack(spacing: 12) {
-                    VStack(spacing: 0) {
-                        Circle().fill(Color.white.opacity(0.22)).frame(width: 3, height: 3)
-                        Rectangle().fill(Color.white.opacity(0.18)).frame(width: 1, height: 16)
-                        Circle().fill(Color.white.opacity(0.22)).frame(width: 3, height: 3)
-                    }
-                    .frame(width: 22)
-
-                    Rectangle()
-                        .fill(Color.white.opacity(0.08))
-                        .frame(height: 1)
-                }
-                .padding(.horizontal, 14)
-
-                HStack(spacing: 12) {
-                    Image(systemName: "mappin.and.ellipse")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(Color.orange)
-                        .frame(width: 22)
+                GlassField(systemImage: "mappin.and.ellipse", tint: .orange) {
                     TextField("Where to?", text: $routeDestinationAddress)
                         .textInputAutocapitalization(.words)
                         .autocorrectionDisabled(false)
                         .submitLabel(.route)
                         .onSubmit(generateRoute)
-                        .foregroundStyle(.white)
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-            }
-            .background(AppTheme.bg.opacity(0.78), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
             }
 
             if let routeErrorMessage {
                 Label(routeErrorMessage, systemImage: "exclamationmark.circle.fill")
                     .font(.caption)
-                    .foregroundStyle(.red.opacity(0.95))
+                    .foregroundStyle(AppTheme.bad)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             if let routeSummary, canStartGuidance {
                 HStack(spacing: 8) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(Color.green)
+                    Image(systemName: "checkmark.seal.fill")
+                        .foregroundStyle(AppTheme.good)
+
                     Text(routeSummary)
-                        .font(.subheadline.weight(.medium))
+                        .font(.ds(14, .semibold))
                         .foregroundStyle(.white)
+
                     Spacer(minLength: 0)
                 }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 11)
+                .glassEffect(.clear.tint(AppTheme.good.opacity(0.18)), in: Capsule())
             }
 
             Button {
@@ -625,45 +728,62 @@ struct ContentView: View {
             } label: {
                 HStack(spacing: 9) {
                     if isResolvingRoute {
-                        ProgressView().tint(.white)
+                        ProgressView().tint(AppTheme.bgDeep)
                         Text("Finding best route…")
                     } else {
                         Image(systemName: "point.topleft.down.curvedto.point.bottomright.up")
                         Text(routeSummary == nil ? "Find best route" : "Recalculate route")
                     }
                 }
-                .font(.headline)
+                .font(.ds(16, .bold))
+                .foregroundStyle(AppTheme.bgDeep)
                 .frame(maxWidth: .infinity)
                 .frame(height: 52)
             }
-            .buttonStyle(.borderedProminent)
-            .tint(AppTheme.accent.opacity(0.88))
+            .buttonStyle(.glassProminent)
+            .tint(AppTheme.accent)
             .disabled(!canGenerateRoute)
+            .opacity(canGenerateRoute ? 1 : 0.5)
 
             if canStartGuidance {
                 Button {
                     startGuidance()
                 } label: {
-                    Label("Start navigation", systemImage: "arrow.up.right")
-                        .font(.subheadline.weight(.semibold))
+                    Label("Start navigation", systemImage: "arrow.triangle.turn.up.right.diamond.fill")
+                        .font(.ds(15, .semibold))
+                        .foregroundStyle(AppTheme.accent)
                         .frame(maxWidth: .infinity)
-                        .frame(height: 42)
+                        .frame(height: 46)
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(AppTheme.accent)
+                .buttonStyle(.glass)
             }
         }
         .padding(.horizontal, 18)
-        .padding(.top, 11)
-        .padding(.bottom, 14)
-        .background(.ultraThinMaterial, in: UnevenRoundedRectangle(topLeadingRadius: 24, topTrailingRadius: 24))
+        .padding(.top, 12)
+        // Extra bottom padding clears the home indicator, since the sheet's
+        // glass is extended past the safe area to meet the screen edge.
+        .padding(.bottom, 42)
+        .glassEffect(
+            .regular,
+            in: UnevenRoundedRectangle(
+                topLeadingRadius: 30,
+                bottomLeadingRadius: 0,
+                bottomTrailingRadius: 0,
+                topTrailingRadius: 30,
+                style: .continuous
+            )
+        )
         .overlay(alignment: .top) {
-            UnevenRoundedRectangle(topLeadingRadius: 24, topTrailingRadius: 24)
-                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+            UnevenRoundedRectangle(
+                topLeadingRadius: 30,
+                bottomLeadingRadius: 0,
+                bottomTrailingRadius: 0,
+                topTrailingRadius: 30,
+                style: .continuous
+            )
+            .strokeBorder(AppTheme.hairline, lineWidth: 1)
         }
-        .shadow(color: .black.opacity(0.24), radius: 24, y: -8)
-        .padding(.horizontal, 10)
-        .padding(.bottom, 6)
+        .shadow(color: .black.opacity(0.3), radius: 26, y: -10)
     }
 
     private var routeStartPointExists: Bool {
@@ -685,45 +805,94 @@ struct ContentView: View {
         startPoint != nil && endPoint != nil && routeCoordinates.count > 1 && !isResolvingRoute
     }
 
-    private func legendRow(color: Color, label: String) -> some View {
-        HStack {
-            Circle().fill(color).frame(width: 12, height: 12)
-            Text(label).foregroundStyle(AppTheme.muted)
+    private func legendRow(color: Color, label: String, range: String) -> some View {
+        HStack(spacing: 12) {
+            Circle()
+                .fill(color)
+                .frame(width: 13, height: 13)
+                .shadow(color: color.opacity(0.65), radius: 5)
+
+            Text(label)
+                .font(.ds(14, .semibold))
+                .foregroundStyle(.white)
+
+            Spacer(minLength: 8)
+
+            Text(range)
+                .font(.dsMono(12, .medium))
+                .foregroundStyle(AppTheme.muted)
         }
     }
 
-    private var userInfoPill: some View {
-        VStack {
-            if lastLocation != nil {
-                userInfoText
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
+    /// Bottom readout: live score gauge, resolved street address and link type.
+    private var statusHUD: some View {
+        HStack(spacing: 12) {
+            if isOnWiFi {
+                Image(systemName: "wifi")
+                    .font(.system(size: 19, weight: .semibold))
+                    .foregroundStyle(AppTheme.accent)
+                    .frame(width: 44, height: 44)
+                    .background(AppTheme.accent.opacity(0.14), in: Circle())
+                    .overlay {
+                        Circle().strokeBorder(AppTheme.accent.opacity(0.3), lineWidth: 1)
+                    }
             } else {
-                Text("Loading Stats...")
+                ScoreRing(score: liveScore, diameter: 44)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(isOnWiFi ? "Wi-Fi connected" : scoreDescriptor(liveScore))
+                    .font(.ds(14, .bold))
+                    .foregroundStyle(.white)
+
+                Text(lastLocation == nil ? "Finding your location…" : currentAddress)
+                    .font(.dsMono(11, .medium))
+                    .foregroundStyle(AppTheme.muted)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
+
+            Spacer(minLength: 4)
+
+            VStack(alignment: .trailing, spacing: 3) {
+                if !userCarrier.isEmpty {
+                    Text(userCarrier)
+                        .font(.ds(11, .bold))
+                        .foregroundStyle(AppTheme.accent)
+                        .lineLimit(1)
+                } else if !isOnWiFi {
+                    Image(systemName: "cellularbars")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(AppTheme.accent)
+                }
+
+                if viewOnlyMode {
+                    Text("VIEW ONLY")
+                        .font(.ds(8, .bold))
+                        .tracking(0.6)
+                        .foregroundStyle(AppTheme.muted)
+                }
             }
         }
-        .font(.system(.footnote, design: .monospaced))
-        .foregroundStyle(AppTheme.muted)
-        .padding(.horizontal, 14)
+        .padding(.leading, 10)
+        .padding(.trailing, 16)
         .padding(.vertical, 10)
-        .background(.ultraThinMaterial, in: Capsule())
-        .padding(.bottom, 20)
-    }
-
-    private var userInfoText: Text {
-        if NetworkStatusMonitor.shared.isUsingWiFi {
-            return Text("Speed: \(Image(systemName: "wifi")) • \(currentAddress)")
+        .glassEffect(.regular, in: Capsule())
+        .overlay {
+            Capsule().strokeBorder(AppTheme.hairline, lineWidth: 1)
         }
-
-        return Text("\(speedSummary) \(Image(systemName: "cellularbars")) • \(currentAddress)")
+        .shadow(color: .black.opacity(0.28), radius: 18, y: 8)
     }
 
-    private var speedSummary: String {
-        let score = speedScore(
+    private var isOnWiFi: Bool {
+        NetworkStatusMonitor.shared.isUsingWiFi
+    }
+
+    private var liveScore: Int {
+        speedScore(
             d: UserStore.shared.downloadMbps ?? 0,
             u: UserStore.shared.uploadMbps ?? 0
         )
-        return "Speed: \(score)"
     }
 
     private func generateRoute() {
@@ -1109,48 +1278,69 @@ struct ContentView: View {
 
     private var legendOverlay: some View {
         ZStack {
-            Color.black.opacity(0.7)
+            Rectangle()
+                .fill(.black.opacity(0.55))
                 .ignoresSafeArea()
                 .onTapGesture {
-                    withAnimation(.easeOut(duration: 0.2)) {
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.84)) {
                         showLegend = false
                     }
                 }
 
-            VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                    Text("Scoring Guide").bold()
-                    Spacer()
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(spacing: 10) {
+                    Image(systemName: "waveform.badge.magnifyingglass")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(AppTheme.accent)
+
+                    Text("Scoring guide")
+                        .font(.ds(19, .bold))
+
+                    Spacer(minLength: 0)
+
                     Button {
-                        withAnimation(.easeOut(duration: 0.2)) {
+                        withAnimation(.spring(response: 0.32, dampingFraction: 0.84)) {
                             showLegend = false
                         }
                     } label: {
-                        Image(systemName: "xmark.circle.fill")
+                        Image(systemName: "xmark")
+                            .font(.system(size: 12, weight: .bold))
                             .foregroundStyle(AppTheme.muted)
+                            .frame(width: 30, height: 30)
+                            .contentShape(Circle())
                     }
+                    .buttonStyle(.plain)
+                    .glassEffect(.clear.interactive(), in: Circle())
                 }
 
-                Text("Score blends download (70%) and upload (30%) speed on a logarithmic scale.")
+                Text("Every point blends download (70%) and upload (30%) speed on a logarithmic scale, so realistic speeds fill the range.")
                     .font(.footnote)
                     .foregroundStyle(AppTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
 
-                VStack(alignment: .leading, spacing: 10) {
-                    legendRow(color: colorForScore(100), label: "Excellent")
-                    legendRow(color: colorForScore(75), label: "Good")
-                    legendRow(color: colorForScore(50), label: "Fair")
-                    legendRow(color: colorForScore(25), label: "Weak")
-                    legendRow(color: colorForScore(0), label: "Dead zone")
+                SignalScaleBar()
+
+                VStack(spacing: 11) {
+                    legendRow(color: colorForScore(100), label: "Excellent", range: "85 – 100")
+                    legendRow(color: colorForScore(75), label: "Good", range: "65 – 84")
+                    legendRow(color: colorForScore(50), label: "Fair", range: "40 – 64")
+                    legendRow(color: colorForScore(25), label: "Weak", range: "15 – 39")
+                    legendRow(color: colorForScore(0), label: "Dead zone", range: "0 – 14")
                 }
             }
-            .padding(20)
-            .frame(maxWidth: 300)
+            .padding(22)
+            .frame(maxWidth: 330)
             .foregroundStyle(.white)
-            .background(Color(red: 0.024, green: 0.055, blue: 0.078))
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-            .shadow(radius: 20)
-            .transition(.scale.combined(with: .opacity))
+            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 30, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 30, style: .continuous)
+                    .strokeBorder(AppTheme.hairline, lineWidth: 1)
+            }
+            .shadow(color: .black.opacity(0.5), radius: 30, y: 14)
+            .padding(24)
+            .transition(.scale(scale: 0.92).combined(with: .opacity))
         }
+        .zIndex(2)
     }
 
     private func startAuthenticatedServices() {
@@ -1356,43 +1546,84 @@ private struct OutageReportSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Outage location") {
-                    Text(locationAddress)
-                        .foregroundStyle(AppTheme.muted)
-                }
+            ZStack {
+                AuroraBackground()
 
-                Section("What is happening?") {
-                    TextField("Briefly describe the outage", text: $message, axis: .vertical)
-                        .lineLimit(3...5)
-                        .onChange(of: message) { _, updatedMessage in
-                            if updatedMessage.count > 100 {
-                                message = String(updatedMessage.prefix(100))
+                ScrollView {
+                    VStack(spacing: 14) {
+                        GlassCard(title: "Outage location", systemImage: "mappin.and.ellipse") {
+                            HStack(spacing: 11) {
+                                Image(systemName: "location.circle.fill")
+                                    .font(.system(size: 17, weight: .semibold))
+                                    .foregroundStyle(AppTheme.warn)
+
+                                Text(locationAddress)
+                                    .font(.ds(14, .medium))
+                                    .foregroundStyle(.white)
+                                    .fixedSize(horizontal: false, vertical: true)
+
+                                Spacer(minLength: 0)
                             }
+                            .padding(.horizontal, 18)
+                            .padding(.bottom, 16)
                         }
 
-                    HStack {
-                        Spacer()
-                        Text("\(message.count)/100")
-                            .font(.caption)
-                            .foregroundStyle(AppTheme.muted)
+                        GlassCard(title: "What is happening?", systemImage: "text.bubble.fill") {
+                            VStack(alignment: .trailing, spacing: 8) {
+                                TextField("Briefly describe the outage", text: $message, axis: .vertical)
+                                    .lineLimit(3...5)
+                                    .font(.ds(15, .medium))
+                                    .foregroundStyle(.white)
+                                    .tint(AppTheme.accent)
+                                    .onChange(of: message) { _, updatedMessage in
+                                        if updatedMessage.count > 100 {
+                                            message = String(updatedMessage.prefix(100))
+                                        }
+                                    }
+
+                                Text("\(message.count)/100")
+                                    .font(.dsMono(11, .semibold))
+                                    .foregroundStyle(message.count >= 100 ? AppTheme.warn : AppTheme.muted)
+                            }
+                            .padding(.horizontal, 18)
+                            .padding(.bottom, 16)
+                        }
+
+                        Button {
+                            submitReport()
+                        } label: {
+                            HStack(spacing: 9) {
+                                if isSubmitting {
+                                    ProgressView().tint(AppTheme.bgDeep)
+                                    Text("Sending…")
+                                } else {
+                                    Image(systemName: "paperplane.fill")
+                                    Text("Send report")
+                                }
+                            }
+                            .font(.ds(16, .bold))
+                            .foregroundStyle(AppTheme.bgDeep)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 52)
+                        }
+                        .buttonStyle(.glassProminent)
+                        .tint(AppTheme.warn)
+                        .disabled(!canSubmitReport)
+                        .opacity(canSubmitReport ? 1 : 0.5)
+                        .padding(.top, 4)
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .padding(.bottom, 30)
                 }
+                .scrollBounceBehavior(.basedOnSize)
             }
-            .scrollContentBackground(.hidden)
-            .background(AppTheme.bg)
             .navigationTitle("Report outage")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                         .disabled(isSubmitting)
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(isSubmitting ? "Sending…" : "Send") {
-                        submitReport()
-                    }
-                    .disabled(isSubmitting || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || username.isEmpty || password.isEmpty)
                 }
             }
             .alert(resultTitle, isPresented: $showResultAlert) {
@@ -1406,9 +1637,17 @@ private struct OutageReportSheet: View {
         .tint(AppTheme.accent)
         .preferredColorScheme(.dark)
         .presentationDetents([.medium, .large])
+        .presentationBackground(.clear)
         .task {
             await lookupLocationAddress()
         }
+    }
+
+    private var canSubmitReport: Bool {
+        !isSubmitting
+            && !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !username.isEmpty
+            && !password.isEmpty
     }
 
     private func lookupLocationAddress() async {
@@ -1502,126 +1741,194 @@ private struct AuthView: View {
 
     var body: some View {
         ZStack {
-            AppTheme.bg.ignoresSafeArea()
+            AuroraBackground()
 
-            VStack(spacing: 24) {
-                VStack(spacing: 10) {
-                    Circle()
-                        .fill(Color(red: 0.016, green: 0.165, blue: 0.227))
-                        .frame(width: 64, height: 64)
-                        .overlay(
+            ScrollView {
+                VStack(spacing: 22) {
+                    VStack(spacing: 12) {
+                        ZStack {
+                            Circle()
+                                .fill(AppTheme.accentGradient)
+                                .frame(width: 80, height: 80)
+                                .blur(radius: 20)
+                                .opacity(0.6)
+
                             Image(systemName: "antenna.radiowaves.left.and.right")
+                                .font(.system(size: 29, weight: .semibold))
                                 .foregroundStyle(AppTheme.accent)
-                                .font(.system(size: 26))
-                        )
+                                .frame(width: 76, height: 76)
+                                .glassEffect(.regular, in: Circle())
+                        }
 
-                    Text("Connectivity")
-                        .font(.title2.bold())
-                        .foregroundStyle(.white)
+                        Text("Connectivity")
+                            .font(.ds(29, .bold))
+                            .foregroundStyle(.white)
 
-                    Text(subtitle)
-                        .font(.footnote)
-                        .foregroundStyle(AppTheme.muted)
+                        Text(subtitle)
+                            .font(.footnote)
+                            .foregroundStyle(AppTheme.muted)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.top, 34)
+
+                    VStack(spacing: 12) {
+                        GlassField(systemImage: "person.fill") {
+                            TextField("Username", text: $username)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .textContentType(.username)
+                                .submitLabel(.next)
+                        }
+
+                        GlassField(systemImage: "lock.fill") {
+                            SecureField("Password", text: $password)
+                                .textContentType(mode == .register ? .newPassword : .password)
+                                .submitLabel(.go)
+                                .onSubmit(submit)
+                        }
+
+                        if mode == .register {
+                            carrierSelector
+                        }
+
+                        if let errorMessage {
+                            Label(errorMessage, systemImage: "exclamationmark.circle.fill")
+                                .font(.caption)
+                                .foregroundStyle(AppTheme.bad)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+
+                        Button(action: submit) {
+                            HStack(spacing: 8) {
+                                if isSubmitting {
+                                    ProgressView().tint(AppTheme.bgDeep)
+                                } else {
+                                    Image(systemName: mode == .register ? "person.badge.plus" : "arrow.right")
+                                    Text(title)
+                                }
+                            }
+                            .font(.ds(16, .bold))
+                            .foregroundStyle(AppTheme.bgDeep)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 52)
+                        }
+                        .buttonStyle(.glassProminent)
+                        .tint(AppTheme.accent)
+                        .disabled(!canSubmit)
+                        .opacity(canSubmit ? 1 : 0.5)
+                        .padding(.top, 4)
+
+                        Button(switchPrompt) {
+                            withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
+                                mode = mode == .register ? .login : .register
+                            }
+                            errorMessage = nil
+                            password = ""
+                            if mode == .register {
+                                Task { await loadCarriers() }
+                            }
+                        }
+                        .font(.ds(13, .semibold))
+                        .foregroundStyle(AppTheme.accent)
+                        .buttonStyle(.plain)
+                        .padding(.top, 6)
+                    }
+                    .padding(20)
+                    .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 30, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 30, style: .continuous)
+                            .strokeBorder(AppTheme.hairline, lineWidth: 1)
+                    }
+
+                    Text("Your readings help map dead zones for everyone.")
+                        .font(.caption2)
+                        .foregroundStyle(AppTheme.muted.opacity(0.85))
                         .multilineTextAlignment(.center)
                 }
-
-                VStack(spacing: 14) {
-                    TextField("Username", text: $username)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .textContentType(.username)
-                        .submitLabel(.next)
-                        .foregroundStyle(.white)
-                        .tint(AppTheme.accent)
-                        .padding(12)
-                        .background(Color.white.opacity(0.06))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-
-                    SecureField("Password", text: $password)
-                        .textContentType(mode == .register ? .newPassword : .password)
-                        .submitLabel(.go)
-                        .onSubmit(submit)
-                        .foregroundStyle(.white)
-                        .tint(AppTheme.accent)
-                        .padding(12)
-                        .background(Color.white.opacity(0.06))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-
-                    if mode == .register {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Carrier")
-                                .font(.caption)
-                                .foregroundStyle(AppTheme.muted)
-
-                            Picker("Carrier", selection: $selectedCarrier) {
-                                Text(isLoadingCarriers ? "Loading carriers…" : "Select a carrier").tag("")
-                                ForEach(carriers, id: \.self) { carrier in
-                                    Text(carrier).tag(carrier)
-                                }
-                            }
-                            .disabled(isLoadingCarriers || carriers.isEmpty)
-                            .pickerStyle(.menu)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(12)
-                            .background(Color.white.opacity(0.06))
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                            .tint(AppTheme.accent)
-
-                            if let carrierLoadError {
-                                Text(carrierLoadError)
-                                    .font(.caption)
-                                    .foregroundStyle(.red)
-                                Button("Retry loading carriers") {
-                                    Task { await loadCarriers() }
-                                }
-                                .font(.caption)
-                                .disabled(isLoadingCarriers)
-                            }
-                        }
-                    }
-
-                    if let errorMessage {
-                        Text(errorMessage)
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-
-                    Button(action: submit) {
-                        if isSubmitting {
-                            ProgressView()
-                                .frame(maxWidth: .infinity)
-                        } else {
-                            Text(title)
-                                .font(.headline)
-                                .frame(maxWidth: .infinity)
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!canSubmit)
-
-                    Button(switchPrompt) {
-                        mode = mode == .register ? .login : .register
-                        errorMessage = nil
-                        password = ""
-                        if mode == .register {
-                            Task { await loadCarriers() }
-                        }
-                    }
-                    .font(.footnote)
-                    .foregroundStyle(AppTheme.accent)
-                    .padding(.top, 4)
-                }
-                .foregroundStyle(.white)
+                .frame(maxWidth: 420)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 22)
+                .padding(.bottom, 40)
             }
-            .padding(24)
-            .frame(maxWidth: 360)
+            .scrollBounceBehavior(.basedOnSize)
         }
         .task {
             if mode == .register {
                 await loadCarriers()
             }
         }
+    }
+
+    private var carrierSelector: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Menu {
+                ForEach(carriers, id: \.self) { carrier in
+                    Button {
+                        selectedCarrier = carrier
+                    } label: {
+                        if selectedCarrier == carrier {
+                            Label(carrier, systemImage: "checkmark")
+                        } else {
+                            Text(carrier)
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "antenna.radiowaves.left.and.right")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(AppTheme.accent)
+                        .frame(width: 22)
+
+                    Text(carrierFieldLabel)
+                        .font(.ds(15, .medium))
+                        .foregroundStyle(selectedCarrier.isEmpty ? AppTheme.muted : .white)
+
+                    Spacer(minLength: 8)
+
+                    if isLoadingCarriers {
+                        ProgressView().controlSize(.small).tint(AppTheme.accent)
+                    } else {
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(AppTheme.muted)
+                    }
+                }
+                .padding(.horizontal, 15)
+                .padding(.vertical, 14)
+                .contentShape(Rectangle())
+            }
+            .disabled(isLoadingCarriers || carriers.isEmpty)
+            .glassEffect(.clear, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(AppTheme.hairline, lineWidth: 1)
+            }
+
+            if let carrierLoadError {
+                HStack(spacing: 8) {
+                    Text(carrierLoadError)
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.bad)
+
+                    Spacer(minLength: 0)
+
+                    Button("Retry") {
+                        Task { await loadCarriers() }
+                    }
+                    .font(.ds(12, .bold))
+                    .foregroundStyle(AppTheme.accent)
+                    .buttonStyle(.plain)
+                    .disabled(isLoadingCarriers)
+                }
+            }
+        }
+    }
+
+    private var carrierFieldLabel: String {
+        if !selectedCarrier.isEmpty { return selectedCarrier }
+        return isLoadingCarriers ? "Loading carriers…" : "Select a carrier"
     }
 
     private func submit() {
