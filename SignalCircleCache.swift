@@ -35,8 +35,8 @@ enum SignalCircleCache {
     }
 
     @discardableResult
-    static func store(newEntries: [SignalCircleJSON]) -> [SignalCircleJSON] {
-        let cachedEntries = loadEntries()
+    static func store(newEntries: [SignalCircleJSON], existing: [SignalCircleJSON]? = nil) -> [SignalCircleJSON] {
+        let cachedEntries = existing ?? loadEntries()
         let mergedEntries = merge(cachedEntries + newEntries)
         save(mergedEntries)
         return mergedEntries
@@ -44,7 +44,7 @@ enum SignalCircleCache {
 
     static func clear() {
         UserDefaults.standard.removeObject(forKey: entriesKey)
-        NotificationCenter.default.post(name: .signalCircleCacheDidChange, object: nil)
+        NotificationCenter.default.post(name: .signalCircleCacheDidChange, object: [SignalCircleJSON]())
     }
 
     static func snapshot() -> SignalCircleCacheSnapshot {
@@ -62,7 +62,7 @@ enum SignalCircleCache {
         do {
             let data = try JSONEncoder().encode(entries)
             UserDefaults.standard.set(data, forKey: entriesKey)
-            NotificationCenter.default.post(name: .signalCircleCacheDidChange, object: nil)
+            NotificationCenter.default.post(name: .signalCircleCacheDidChange, object: entries)
         } catch {
             print("Failed to cache signal circles: \(error.localizedDescription)")
         }

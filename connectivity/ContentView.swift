@@ -15,63 +15,10 @@ enum AuthMode: Equatable {
     case register
 }
 
-enum RouteStartMode: String, CaseIterable, Identifiable {
-    case currentLocation
-    case customAddress
-
-    var id: String { rawValue }
-
-    var label: String {
-        switch self {
-        case .currentLocation: return "Current Location"
-        case .customAddress: return "Address"
-        }
-    }
-}
-
-private enum RouteBuilderError: LocalizedError {
-    case currentLocationUnavailable
-    case emptyAddress(String)
-    case locationNotFound(String)
-    case noRoutesFound
-
-    var errorDescription: String? {
-        switch self {
-        case .currentLocationUnavailable:
-            return "Current location is not ready yet. Try again in a moment or enter a start address."
-        case .emptyAddress(let field):
-            return "Enter a \(field) address."
-        case .locationNotFound(let query):
-            return "Could not find \"\(query)\". Try a more specific address."
-        case .noRoutesFound:
-            return "No driving routes were found for those locations."
-        }
-    }
-}
-
-private struct SignalRouteOption {
-    let name: String
-    let coordinates: [CLLocationCoordinate2D]
-    let signalScore: Double
-    let travelTime: TimeInterval
-    let usesDataWaypoint: Bool
-
-    var selectionScore: Double {
-        signalScore - (travelTime / 300.0)
-    }
-}
-
 struct ContentView: View {
     @State private var circles: [SignalCircle] = []
-    @State private var startPoint: CLLocationCoordinate2D?
-    @State private var endPoint: CLLocationCoordinate2D?
-    @State private var routeCoordinates: [CLLocationCoordinate2D] = []
-    @State private var routeStartMode: RouteStartMode = .currentLocation
-    @State private var routeStartAddress = ""
-    @State private var routeDestinationAddress = ""
-    @State private var routeErrorMessage: String?
-    @State private var routeSummary: String?
-    @State private var isResolvingRoute = false
+    /// Kept here so a planned route survives closing and reopening the planner.
+    @State private var routePlanner = RoutePlanner()
     @State private var lastLocation: CLLocation?
     @State private var currentAddress = "Finding address..."
     @State private var lastAddressLocation: CLLocation?
@@ -138,13 +85,17 @@ struct ContentView: View {
                 latitude: UserStore.shared.coordinate.latitude,
                 longitude: UserStore.shared.coordinate.longitude
             )
-            lastLocation = updatedLocation
-            updateAddressIfNeeded(for: updatedLocation)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .signalCircleCacheDidChange)) { _ in
-            if carrierFilter == "All" {
-                circles = SignalCircleCache.loadEntries().map { $0.toSignalCircle() }
+            // Assigning a new CLLocation re-renders the whole screen (map
+            // included), so only do it when the user actually moved.
+            if lastLocation == nil || updatedLocation.distance(from: lastLocation!) > 5 {
+                lastLocation = updatedLocation
+                updateAddressIfNeeded(for: updatedLocation)
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .signalCircleCacheDidChange)) { notification in
+            guard carrierFilter == "All" else { return }
+            let entries = notification.object as? [SignalCircleJSON] ?? SignalCircleCache.loadEntries()
+            circles = entries.map { $0.toSignalCircle() }
         }
         .onAppear {
             guard isLoggedIn else { return }
@@ -169,8 +120,8 @@ struct ContentView: View {
             AppTheme.bg.ignoresSafeArea()
 
             ConnectivityMapView(
-                startPoint: $startPoint,
-                endPoint: $endPoint,
+                startPoint: .constant(nil),
+                endPoint: .constant(nil),
                 circles: $circles,
                 routeCoordinates: [],
                 dataDisplayMode: signalDataDisplayMode,
@@ -246,8 +197,13 @@ struct ContentView: View {
             }
         }
         .fullScreenCover(isPresented: $showRouteBuilderPage) {
-            routeBuilderPage
-                .preferredColorScheme(.dark)
+            RouteBuilderView(
+                planner: routePlanner,
+                circles: $circles,
+                dataDisplayMode: signalDataDisplayMode,
+                onClose: { showRouteBuilderPage = false }
+            )
+            .preferredColorScheme(.dark)
         }
         .fullScreenCover(isPresented: $showLeaderboardPage) {
             LeaderboardView()
@@ -533,278 +489,6 @@ struct ContentView: View {
         .buttonStyle(.plain)
     }
 
-    private var routeBuilderPage: some View {
-        ZStack {
-            AppTheme.bg.ignoresSafeArea()
-
-            ConnectivityMapView(
-                startPoint: $startPoint,
-                endPoint: $endPoint,
-                circles: $circles,
-                routeCoordinates: routeCoordinates,
-                dataDisplayMode: signalDataDisplayMode,
-                showsRouteBuilderOverlays: true,
-                allowsRoutePointSelection: false,
-                recenterMap: $recenterMap
-            )
-            .ignoresSafeArea()
-
-            VStack(spacing: 0) {
-                LinearGradient(
-                    colors: [Color.black.opacity(0.5), .clear],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .frame(height: 180)
-
-                Spacer(minLength: 0)
-            }
-            .ignoresSafeArea()
-            .allowsHitTesting(false)
-
-            VStack(spacing: 0) {
-                routeBuilderHeader
-                    .padding(.horizontal, 14)
-
-                Spacer(minLength: 0)
-            }
-
-            VStack(spacing: 0) {
-                Spacer(minLength: 0)
-
-                routeBuilderControls
-            }
-            .ignoresSafeArea(edges: .bottom)
-        }
-        .foregroundStyle(.white)
-    }
-
-    private var routeBuilderHeader: some View {
-        GlassEffectContainer(spacing: 0) {
-            HStack(spacing: 10) {
-                Button {
-                    showRouteBuilderPage = false
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 42, height: 42)
-                        .contentShape(Circle())
-                }
-                .buttonStyle(PressScaleStyle())
-                .glassEffect(.regular.interactive(), in: Circle())
-
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("ROUTE PLANNER")
-                        .font(.ds(9, .bold))
-                        .tracking(1.3)
-                        .foregroundStyle(AppTheme.muted)
-
-                    Text("Plan your drive")
-                        .font(.ds(16, .bold))
-                        .foregroundStyle(.white)
-                }
-                .padding(.horizontal, 15)
-                .frame(height: 42)
-                .glassEffect(.regular, in: Capsule())
-
-                Spacer(minLength: 0)
-
-                Button {
-                    recenterMap = true
-                } label: {
-                    Image(systemName: "location.fill")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(AppTheme.accent)
-                        .frame(width: 42, height: 42)
-                        .contentShape(Circle())
-                }
-                .buttonStyle(PressScaleStyle())
-                .glassEffect(.regular.interactive(), in: Circle())
-            }
-        }
-        .padding(.top, 4)
-    }
-
-    private var routeBuilderControls: some View {
-        VStack(alignment: .leading, spacing: 15) {
-            Capsule()
-                .fill(Color.white.opacity(0.26))
-                .frame(width: 38, height: 4)
-                .frame(maxWidth: .infinity)
-
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Build a route")
-                        .font(.ds(21, .bold))
-
-                    Text("Find a path with better signal")
-                        .font(.footnote)
-                        .foregroundStyle(AppTheme.muted)
-                }
-
-                Spacer()
-
-                if routeStartPointExists || !routeDestinationAddress.isEmpty || !routeCoordinates.isEmpty {
-                    Button("Clear") { clearRouteBuilder() }
-                        .font(.ds(14, .bold))
-                        .foregroundStyle(AppTheme.accent)
-                        .buttonStyle(.plain)
-                }
-            }
-
-            GlassSegmented(
-                options: [
-                    (label: "My location", value: RouteStartMode.currentLocation),
-                    (label: "Address", value: RouteStartMode.customAddress)
-                ],
-                selection: $routeStartMode
-            )
-
-            VStack(spacing: 9) {
-                if routeStartMode == .currentLocation {
-                    GlassField(systemImage: "location.fill", tint: AppTheme.good) {
-                        HStack(spacing: 0) {
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text("START")
-                                    .font(.ds(9, .bold))
-                                    .tracking(0.9)
-                                    .foregroundStyle(AppTheme.muted)
-
-                                Text("Current location")
-                                    .font(.ds(15, .medium))
-                                    .foregroundStyle(.white)
-                            }
-
-                            Spacer(minLength: 0)
-
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(AppTheme.accent)
-                        }
-                    }
-                } else {
-                    GlassField(systemImage: "circle.circle.fill", tint: AppTheme.good) {
-                        TextField("Starting point", text: $routeStartAddress)
-                            .textInputAutocapitalization(.words)
-                            .autocorrectionDisabled(false)
-                            .submitLabel(.next)
-                    }
-                }
-
-                GlassField(systemImage: "mappin.and.ellipse", tint: .orange) {
-                    TextField("Where to?", text: $routeDestinationAddress)
-                        .textInputAutocapitalization(.words)
-                        .autocorrectionDisabled(false)
-                        .submitLabel(.route)
-                        .onSubmit(generateRoute)
-                }
-            }
-
-            if let routeErrorMessage {
-                Label(routeErrorMessage, systemImage: "exclamationmark.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(AppTheme.bad)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            if let routeSummary, canStartGuidance {
-                HStack(spacing: 8) {
-                    Image(systemName: "checkmark.seal.fill")
-                        .foregroundStyle(AppTheme.good)
-
-                    Text(routeSummary)
-                        .font(.ds(14, .semibold))
-                        .foregroundStyle(.white)
-
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 11)
-                .glassEffect(.clear.tint(AppTheme.good.opacity(0.18)), in: Capsule())
-            }
-
-            Button {
-                generateRoute()
-            } label: {
-                HStack(spacing: 9) {
-                    if isResolvingRoute {
-                        ProgressView().tint(AppTheme.bgDeep)
-                        Text("Finding best route…")
-                    } else {
-                        Image(systemName: "point.topleft.down.curvedto.point.bottomright.up")
-                        Text(routeSummary == nil ? "Find best route" : "Recalculate route")
-                    }
-                }
-                .font(.ds(16, .bold))
-                .foregroundStyle(AppTheme.bgDeep)
-                .frame(maxWidth: .infinity)
-                .frame(height: 52)
-            }
-            .buttonStyle(.glassProminent)
-            .tint(AppTheme.accent)
-            .disabled(!canGenerateRoute)
-            .opacity(canGenerateRoute ? 1 : 0.5)
-
-            if canStartGuidance {
-                Button {
-                    startGuidance()
-                } label: {
-                    Label("Start navigation", systemImage: "arrow.triangle.turn.up.right.diamond.fill")
-                        .font(.ds(15, .semibold))
-                        .foregroundStyle(AppTheme.accent)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 46)
-                }
-                .buttonStyle(.glass)
-            }
-        }
-        .padding(.horizontal, 18)
-        .padding(.top, 12)
-        // Extra bottom padding clears the home indicator, since the sheet's
-        // glass is extended past the safe area to meet the screen edge.
-        .padding(.bottom, 42)
-        .glassEffect(
-            .regular,
-            in: UnevenRoundedRectangle(
-                topLeadingRadius: 30,
-                bottomLeadingRadius: 0,
-                bottomTrailingRadius: 0,
-                topTrailingRadius: 30,
-                style: .continuous
-            )
-        )
-        .overlay(alignment: .top) {
-            UnevenRoundedRectangle(
-                topLeadingRadius: 30,
-                bottomLeadingRadius: 0,
-                bottomTrailingRadius: 0,
-                topTrailingRadius: 30,
-                style: .continuous
-            )
-            .strokeBorder(AppTheme.hairline, lineWidth: 1)
-        }
-        .shadow(color: .black.opacity(0.3), radius: 26, y: -10)
-    }
-
-    private var routeStartPointExists: Bool {
-        startPoint != nil || !routeStartAddress.isEmpty
-    }
-
-    private var canGenerateRoute: Bool {
-        guard !isResolvingRoute else { return false }
-        guard !routeDestinationAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
-
-        if routeStartMode == .customAddress {
-            return !routeStartAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }
-
-        return true
-    }
-
-    private var canStartGuidance: Bool {
-        startPoint != nil && endPoint != nil && routeCoordinates.count > 1 && !isResolvingRoute
-    }
-
     private func legendRow(color: Color, label: String, range: String) -> some View {
         HStack(spacing: 12) {
             Circle()
@@ -824,64 +508,48 @@ struct ContentView: View {
         }
     }
 
-    /// Bottom readout: live score gauge, resolved street address and link type.
+    /// Bottom stack: quick map controls above the live telemetry dock.
     private var statusHUD: some View {
-        HStack(spacing: 12) {
-            if isOnWiFi {
-                Image(systemName: "wifi")
-                    .font(.system(size: 19, weight: .semibold))
-                    .foregroundStyle(AppTheme.accent)
-                    .frame(width: 44, height: 44)
-                    .background(AppTheme.accent.opacity(0.14), in: Circle())
-                    .overlay {
-                        Circle().strokeBorder(AppTheme.accent.opacity(0.3), lineWidth: 1)
+        VStack(alignment: .trailing, spacing: 10) {
+            GlassEffectContainer(spacing: 8) {
+                VStack(spacing: 8) {
+                    GlassIconButton(systemName: "info", diameter: 44) {
+                        withAnimation(.spring(response: 0.36, dampingFraction: 0.8)) {
+                            showLegend = true
+                        }
                     }
-            } else {
-                ScoreRing(score: liveScore, diameter: 44)
-            }
+                    .accessibilityLabel("Scoring guide")
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(isOnWiFi ? "Wi-Fi connected" : scoreDescriptor(liveScore))
-                    .font(.ds(14, .bold))
-                    .foregroundStyle(.white)
-
-                Text(lastLocation == nil ? "Finding your location…" : currentAddress)
-                    .font(.dsMono(11, .medium))
-                    .foregroundStyle(AppTheme.muted)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-            }
-
-            Spacer(minLength: 4)
-
-            VStack(alignment: .trailing, spacing: 3) {
-                if !userCarrier.isEmpty {
-                    Text(userCarrier)
-                        .font(.ds(11, .bold))
-                        .foregroundStyle(AppTheme.accent)
-                        .lineLimit(1)
-                } else if !isOnWiFi {
-                    Image(systemName: "cellularbars")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(AppTheme.accent)
-                }
-
-                if viewOnlyMode {
-                    Text("VIEW ONLY")
-                        .font(.ds(8, .bold))
-                        .tracking(0.6)
-                        .foregroundStyle(AppTheme.muted)
+                    GlassIconButton(systemName: "location.fill", diameter: 44) {
+                        recenterMap = true
+                    }
+                    .accessibilityLabel("Recenter map")
                 }
             }
+            .sensoryFeedback(.impact(weight: .light), trigger: recenterMap) { _, new in new }
+
+            TelemetryDock(
+                isOnWiFi: isOnWiFi,
+                fallbackScore: liveScore,
+                addressLine: lastLocation == nil ? "Finding your location…" : currentAddress,
+                carrier: userCarrier,
+                viewOnlyMode: viewOnlyMode,
+                nearby: nearbySummary,
+                onRunTest: { BackgroundTaskManager.shared.runSpeedTestAndLog() }
+            )
         }
-        .padding(.leading, 10)
-        .padding(.trailing, 16)
-        .padding(.vertical, 10)
-        .glassEffect(.regular, in: Capsule())
-        .overlay {
-            Capsule().strokeBorder(AppTheme.hairline, lineWidth: 1)
-        }
-        .shadow(color: .black.opacity(0.28), radius: 18, y: 8)
+    }
+
+    /// Average of tested areas within 1.5 km of the user.
+    private var nearbySummary: NearbySignalSummary? {
+        guard let lastLocation, !circles.isEmpty else { return nil }
+        let radius = 1_500.0
+        let here = MKMapPoint(lastLocation.coordinate)
+        let nearby = circles.filter { here.distance(to: MKMapPoint($0.coordinate)) <= radius }
+        guard !nearby.isEmpty else { return nil }
+
+        let average = nearby.map(\.score).reduce(0, +) / nearby.count
+        return NearbySignalSummary(averageScore: average, spotCount: nearby.count, radiusMeters: radius)
     }
 
     private var isOnWiFi: Bool {
@@ -892,251 +560,6 @@ struct ContentView: View {
         speedScore(
             d: UserStore.shared.downloadMbps ?? 0,
             u: UserStore.shared.uploadMbps ?? 0
-        )
-    }
-
-    private func generateRoute() {
-        guard canGenerateRoute else { return }
-
-        let destinationQuery = routeDestinationAddress.trimmingCharacters(in: .whitespacesAndNewlines)
-        let startQuery = routeStartAddress.trimmingCharacters(in: .whitespacesAndNewlines)
-        let searchCenter = UserStore.shared.coordinate
-
-        isResolvingRoute = true
-        routeErrorMessage = nil
-        routeSummary = nil
-        routeCoordinates = []
-
-        switch routeStartMode {
-        case .currentLocation:
-            guard UserStore.shared.hasFix else {
-                finishRouteGeneration(with: RouteBuilderError.currentLocationUnavailable)
-                return
-            }
-            resolveDestinationAndCalculateRoute(destinationQuery: destinationQuery, start: searchCenter)
-        case .customAddress:
-            resolveRouteCoordinate(for: startQuery, near: searchCenter, emptyFieldName: "start") { result in
-                switch result {
-                case .success(let start):
-                    resolveDestinationAndCalculateRoute(destinationQuery: destinationQuery, start: start)
-                case .failure(let error):
-                    finishRouteGeneration(with: error)
-                }
-            }
-        }
-    }
-
-    private func resolveDestinationAndCalculateRoute(destinationQuery: String, start: CLLocationCoordinate2D) {
-        resolveRouteCoordinate(for: destinationQuery, near: start, emptyFieldName: "destination") { result in
-            switch result {
-            case .success(let end):
-                DispatchQueue.main.async {
-                    startPoint = start
-                    endPoint = end
-                }
-                calculateRoute(from: start, to: end)
-            case .failure(let error):
-                finishRouteGeneration(with: error)
-            }
-        }
-    }
-
-    private func resolveRouteCoordinate(
-        for query: String,
-        near coordinate: CLLocationCoordinate2D,
-        emptyFieldName: String,
-        completion: @escaping (Result<CLLocationCoordinate2D, Error>) -> Void
-    ) {
-        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedQuery.isEmpty else {
-            completion(.failure(RouteBuilderError.emptyAddress(emptyFieldName)))
-            return
-        }
-
-        let region = MKCoordinateRegion(
-            center: coordinate,
-            span: MKCoordinateSpan(latitudeDelta: 0.5, longitudeDelta: 0.5)
-        )
-        let request = MKLocalSearch.Request(naturalLanguageQuery: trimmedQuery, region: region)
-        request.resultTypes = [.address, .pointOfInterest]
-
-        MKLocalSearch(request: request).start { response, error in
-            if let error {
-                completion(.failure(error))
-                return
-            }
-
-            guard let mapItem = response?.mapItems.first else {
-                completion(.failure(RouteBuilderError.locationNotFound(trimmedQuery)))
-                return
-            }
-
-            completion(.success(mapItem.location.coordinate))
-        }
-    }
-
-    private func calculateRoute(from start: CLLocationCoordinate2D, to end: CLLocationCoordinate2D) {
-        let waypoints = signalWaypointCandidates(from: start, to: end)
-        let group = DispatchGroup()
-        let lock = NSLock()
-        var options: [SignalRouteOption] = []
-
-        func appendOptions(_ newOptions: [SignalRouteOption]) {
-            lock.lock()
-            options.append(contentsOf: newOptions)
-            lock.unlock()
-        }
-
-        group.enter()
-        calculateRouteOptions(from: start, to: end, via: nil) { routeOptions in
-            appendOptions(routeOptions)
-            group.leave()
-        }
-
-        for waypoint in waypoints {
-            group.enter()
-            calculateRouteOptions(from: start, to: end, via: waypoint.coordinate) { routeOptions in
-                appendOptions(routeOptions)
-                group.leave()
-            }
-        }
-
-        group.notify(queue: .main) {
-            guard let best = options.max(by: { $0.selectionScore < $1.selectionScore }) else {
-                finishRouteGeneration(with: RouteBuilderError.noRoutesFound)
-                return
-            }
-
-            print("Chose: \(best.name) — signal score: \(String(format: "%.1f", best.signalScore)) — ETA: \(Int(best.travelTime / 60))min — data waypoint: \(best.usesDataWaypoint)")
-            routeCoordinates = best.coordinates
-            routeSummary = "\(Int(best.travelTime / 60)) min · Signal score \(Int(best.signalScore.rounded()))"
-            isResolvingRoute = false
-        }
-    }
-
-    private func calculateRouteOptions(
-        from start: CLLocationCoordinate2D,
-        to end: CLLocationCoordinate2D,
-        via waypoint: CLLocationCoordinate2D?,
-        completion: @escaping ([SignalRouteOption]) -> Void
-    ) {
-        if let waypoint {
-            calculateRouteLeg(from: start, to: waypoint, requestsAlternateRoutes: false) { firstLegs in
-                guard let firstLeg = firstLegs.min(by: { $0.expectedTravelTime < $1.expectedTravelTime }) else {
-                    completion([])
-                    return
-                }
-
-                calculateRouteLeg(from: waypoint, to: end, requestsAlternateRoutes: false) { secondLegs in
-                    guard let secondLeg = secondLegs.min(by: { $0.expectedTravelTime < $1.expectedTravelTime }) else {
-                        completion([])
-                        return
-                    }
-
-                    let coordinates = combinedCoordinates(for: [firstLeg, secondLeg])
-                    let travelTime = firstLeg.expectedTravelTime + secondLeg.expectedTravelTime
-                    let signalScore = scoreRouteCoordinates(coordinates)
-                    completion([
-                        SignalRouteOption(
-                            name: "Via signal data",
-                            coordinates: coordinates,
-                            signalScore: signalScore,
-                            travelTime: travelTime,
-                            usesDataWaypoint: true
-                        )
-                    ])
-                }
-            }
-            return
-        }
-
-        calculateRouteLeg(from: start, to: end, requestsAlternateRoutes: true) { routes in
-            let routeOptions = routes.map { route in
-                let coordinates = coordinates(for: route)
-                return SignalRouteOption(
-                    name: route.name.isEmpty ? "Direct route" : route.name,
-                    coordinates: coordinates,
-                    signalScore: scoreRouteCoordinates(coordinates),
-                    travelTime: route.expectedTravelTime,
-                    usesDataWaypoint: false
-                )
-            }
-            completion(routeOptions)
-        }
-    }
-
-    private func calculateRouteLeg(
-        from start: CLLocationCoordinate2D,
-        to end: CLLocationCoordinate2D,
-        requestsAlternateRoutes: Bool,
-        completion: @escaping ([MKRoute]) -> Void
-    ) {
-        let request = MKDirections.Request()
-        request.source = MKMapItem(location: CLLocation(latitude: start.latitude, longitude: start.longitude), address: nil)
-        request.destination = MKMapItem(location: CLLocation(latitude: end.latitude, longitude: end.longitude), address: nil)
-        request.transportType = .automobile
-        request.requestsAlternateRoutes = requestsAlternateRoutes
-
-        MKDirections(request: request).calculate { response, error in
-            if let error {
-                print("Route leg error: \(error.localizedDescription)")
-            }
-            completion(response?.routes ?? [])
-        }
-    }
-
-    private func coordinates(for route: MKRoute) -> [CLLocationCoordinate2D] {
-        let pointCount = route.polyline.pointCount
-        var coords = [CLLocationCoordinate2D](repeating: .init(), count: pointCount)
-        route.polyline.getCoordinates(&coords, range: NSRange(location: 0, length: pointCount))
-        return coords
-    }
-
-    private func combinedCoordinates(for routes: [MKRoute]) -> [CLLocationCoordinate2D] {
-        routes.enumerated().flatMap { index, route in
-            let coords = coordinates(for: route)
-            return index == 0 ? coords : Array(coords.dropFirst())
-        }
-    }
-
-    private func finishRouteGeneration(with error: Error) {
-        DispatchQueue.main.async {
-            routeErrorMessage = error.localizedDescription
-            isResolvingRoute = false
-        }
-    }
-
-    private func clearRouteBuilder() {
-        startPoint = nil
-        endPoint = nil
-        routeCoordinates = []
-        routeSummary = nil
-        routeStartAddress = ""
-        routeDestinationAddress = ""
-        routeErrorMessage = nil
-        isResolvingRoute = false
-    }
-
-    private func startGuidance() {
-        guard let startPoint, let endPoint else { return }
-
-        let destination = MKMapItem(location: CLLocation(latitude: endPoint.latitude, longitude: endPoint.longitude), address: nil)
-        destination.name = routeDestinationAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? "Destination"
-            : routeDestinationAddress.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        let source: MKMapItem
-        if routeStartMode == .currentLocation {
-            source = MKMapItem.forCurrentLocation()
-        } else {
-            source = MKMapItem(location: CLLocation(latitude: startPoint.latitude, longitude: startPoint.longitude), address: nil)
-            let startName = routeStartAddress.trimmingCharacters(in: .whitespacesAndNewlines)
-            source.name = startName.isEmpty ? "Start" : startName
-        }
-
-        MKMapItem.openMaps(
-            with: [source, destination],
-            launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving]
         )
     }
 
@@ -1187,7 +610,8 @@ struct ContentView: View {
                     return
                 }
 
-                let mergedEntries = SignalCircleCache.store(newEntries: fetched)
+                guard !fetched.isEmpty else { return }
+                let mergedEntries = SignalCircleCache.store(newEntries: fetched, existing: cachedEntries)
                 circles = mergedEntries.map { $0.toSignalCircle() }
             }
         }
@@ -1385,19 +809,13 @@ struct ContentView: View {
         userName = ""
         UserDefaults.standard.removeObject(forKey: "userPassword")
         circles = []
-        startPoint = nil
-        endPoint = nil
-        routeCoordinates = []
-        routeStartMode = .currentLocation
-        routeStartAddress = ""
-        routeDestinationAddress = ""
-        routeErrorMessage = nil
-        isResolvingRoute = false
+        routePlanner.clear()
         lastLocation = nil
         currentAddress = "Finding address..."
         lastAddressLocation = nil
         isResolvingAddress = false
         hasCenteredOnFix = false
+        LiveTelemetry.shared.reset()
         showLegend = false
         showSettings = false
         showRouteBuilderPage = false
@@ -1430,102 +848,6 @@ struct ContentView: View {
         }
     }
     
-    private func signalWaypointCandidates(from start: CLLocationCoordinate2D, to end: CLLocationCoordinate2D) -> [SignalCircle] {
-        guard !circles.isEmpty else { return [] }
-
-        let startPoint = MKMapPoint(start)
-        let endPoint = MKMapPoint(end)
-        let directDistance = max(startPoint.distance(to: endPoint), 1)
-        let corridorWidth = min(max(directDistance * 0.25, 750), 5_000)
-        let maxAddedDistance = max(directDistance * 0.75, 2_000)
-
-        let rankedCandidates = circles
-            .filter { $0.score >= 55 }
-            .compactMap { circle -> (circle: SignalCircle, rank: Double)? in
-                let point = MKMapPoint(circle.coordinate)
-                let progress = routeProgress(for: point, from: startPoint, to: endPoint)
-                guard (0.08...0.92).contains(progress) else { return nil }
-
-                let distanceFromRoute = distanceFromSegment(point, start: startPoint, end: endPoint)
-                guard distanceFromRoute <= corridorWidth else { return nil }
-
-                let addedDistance = startPoint.distance(to: point) + point.distance(to: endPoint) - directDistance
-                guard addedDistance <= maxAddedDistance else { return nil }
-
-                let rank = Double(circle.score) * 4.0 - (distanceFromRoute / 120.0) - (addedDistance / 250.0)
-                return (circle, rank)
-            }
-            .sorted { $0.rank > $1.rank }
-
-        var selected: [SignalCircle] = []
-        for candidate in rankedCandidates {
-            let candidatePoint = MKMapPoint(candidate.circle.coordinate)
-            let isTooClose = selected.contains { existing in
-                MKMapPoint(existing.coordinate).distance(to: candidatePoint) < 600
-            }
-
-            if !isTooClose {
-                selected.append(candidate.circle)
-            }
-
-            if selected.count == 6 {
-                break
-            }
-        }
-
-        return selected
-    }
-
-    private func routeProgress(for point: MKMapPoint, from start: MKMapPoint, to end: MKMapPoint) -> Double {
-        let dx = end.x - start.x
-        let dy = end.y - start.y
-        let lengthSquared = dx * dx + dy * dy
-        guard lengthSquared > 0 else { return 0 }
-
-        let progress = ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared
-        return min(max(progress, 0), 1)
-    }
-
-    private func distanceFromSegment(_ point: MKMapPoint, start: MKMapPoint, end: MKMapPoint) -> CLLocationDistance {
-        let progress = routeProgress(for: point, from: start, to: end)
-        let projected = MKMapPoint(
-            x: start.x + (end.x - start.x) * progress,
-            y: start.y + (end.y - start.y) * progress
-        )
-        return point.distance(to: projected)
-    }
-
-    private func scoreRoute(_ route: MKRoute) -> Double {
-        scoreRouteCoordinates(coordinates(for: route))
-    }
-
-    private func scoreRouteCoordinates(_ coordinates: [CLLocationCoordinate2D]) -> Double {
-        guard !circles.isEmpty else { return 50 }
-        guard !coordinates.isEmpty else { return 50 }
-
-        let sampled = stride(from: 0, to: coordinates.count, by: 5).map { coordinates[$0] }
-        guard !sampled.isEmpty else { return 50 }
-
-        let totalScore = sampled.reduce(0.0) { total, coordinate in
-            let pointLocation = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
-            guard let closest = circles.min(by: { a, b in
-                let aLocation = CLLocation(latitude: a.coordinate.latitude, longitude: a.coordinate.longitude)
-                let bLocation = CLLocation(latitude: b.coordinate.latitude, longitude: b.coordinate.longitude)
-                return aLocation.distance(from: pointLocation) < bLocation.distance(from: pointLocation)
-            }) else {
-                return total + 50.0
-            }
-
-            let closestLocation = CLLocation(
-                latitude: closest.coordinate.latitude,
-                longitude: closest.coordinate.longitude
-            )
-            let distance = closestLocation.distance(from: pointLocation)
-            return total + (distance <= closest.radius ? Double(closest.score) : 50.0)
-        }
-
-        return totalScore / Double(sampled.count)
-    }
 }
 
 private struct OutageReportSheet: View {
@@ -1747,6 +1069,9 @@ private struct AuthView: View {
                 VStack(spacing: 22) {
                     VStack(spacing: 12) {
                         ZStack {
+                            RadarPulse()
+                                .frame(width: 170, height: 170)
+
                             Circle()
                                 .fill(AppTheme.accentGradient)
                                 .frame(width: 80, height: 80)
@@ -1758,7 +1083,9 @@ private struct AuthView: View {
                                 .foregroundStyle(AppTheme.accent)
                                 .frame(width: 76, height: 76)
                                 .glassEffect(.regular, in: Circle())
+                                .symbolEffect(.variableColor.iterative, options: .repeating)
                         }
+                        .frame(height: 130)
 
                         Text("Connectivity")
                             .font(.ds(29, .bold))

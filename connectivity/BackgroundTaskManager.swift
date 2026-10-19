@@ -41,22 +41,54 @@ final class BackgroundTaskManager {
         }
     }
 
+    private let runLock = NSLock()
+    private var isRunning = false
+
+    /// Short test intervals (1–5s) are shorter than a test takes on a slow
+    /// link, so without this guard runs pile up and skew each other's timing.
+    private func beginRun() -> Bool {
+        runLock.lock(); defer { runLock.unlock() }
+        guard !isRunning else { return false }
+        isRunning = true
+        return true
+    }
+
+    private func endRun() {
+        runLock.lock(); isRunning = false; runLock.unlock()
+    }
+
+    private func setPhase(_ phase: TelemetryPhase) {
+        Task { @MainActor in LiveTelemetry.shared.setPhase(phase) }
+    }
+
     func runSpeedTestAndLog(completion: (() -> Void)? = nil) {
         guard !NetworkStatusMonitor.shared.isUsingWiFi else {
             UserStore.shared.updateSpeed(downloadMbps: nil, uploadMbps: nil)
+            setPhase(.wifiPaused)
             completion?()
             return
         }
 
+        guard beginRun() else {
+            completion?()
+            return
+        }
+
+        setPhase(.download)
         SpeedTest.shared.measureDownload { downloadMbps, error in
             if let error = error {
                 print("Download test failed: \(error)")
             }
+            self.setPhase(.upload)
             SpeedTest.shared.measureUpload { uploadMbps, error in
                 if let error = error {
                     print("Upload test failed: \(error)")
                 }
                 self.reportResult(downloadMbps: downloadMbps, uploadMbps: uploadMbps)
+                Task { @MainActor in
+                    LiveTelemetry.shared.record(downloadMbps: downloadMbps, uploadMbps: uploadMbps)
+                }
+                self.endRun()
                 completion?()
             }
         }
