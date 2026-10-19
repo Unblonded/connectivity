@@ -69,7 +69,9 @@ struct RouteBuilderView: View {
                 sheet
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { sheetHeight = $0 }
             }
-            .ignoresSafeArea(edges: .bottom)
+            // Only the container region: the sheet should still ride up
+            // with the keyboard while editing.
+            .ignoresSafeArea(.container, edges: .bottom)
         }
         .foregroundStyle(.white)
         .onChange(of: planner.startQuery) { _, query in
@@ -189,8 +191,9 @@ struct RouteBuilderView: View {
         .padding(.horizontal, 18)
         .padding(.top, 12)
         // Extra bottom padding clears the home indicator, since the sheet's
-        // glass is extended past the safe area to meet the screen edge.
-        .padding(.bottom, 40)
+        // glass is extended past the safe area to meet the screen edge. When
+        // the keyboard is up the sheet sits on it, so less is needed.
+        .padding(.bottom, focusedField == nil ? 40 : 14)
         .glassEffect(.regular, in: sheetShape)
         .overlay(alignment: .top) {
             sheetShape.strokeBorder(AppTheme.hairline, lineWidth: 1)
